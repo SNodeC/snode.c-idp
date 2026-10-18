@@ -4,7 +4,7 @@
 #include <cstring>
 #include <ctime>
 #include <iomanip>
-#include <openssl/hmac.h>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sstream>
 #include <stdexcept>
@@ -17,7 +17,7 @@ namespace snodec {
 
         std::string Totp::generateSecret() {
             std::vector<uint8_t> randomBytes(20); // 160 bits
-            if (RAND_bytes(randomBytes.data(), randomBytes.size()) != 1) {
+            if (RAND_bytes_ex(nullptr, randomBytes.data(), randomBytes.size(), 0) != 1) {
                 throw std::runtime_error("Failed to generate random bytes");
             }
             return base32Encode(randomBytes);
@@ -25,7 +25,7 @@ namespace snodec {
 
         std::string Totp::base32Encode(const std::vector<uint8_t>& data) {
             std::string result;
-            int buffer = 0;
+            uint32_t buffer = 0;
             int bitsLeft = 0;
 
             for (uint8_t byte : data) {
@@ -49,7 +49,7 @@ namespace snodec {
 
         std::vector<uint8_t> Totp::base32Decode(const std::string& encoded) {
             std::vector<uint8_t> result;
-            int buffer = 0;
+            uint32_t buffer = 0;
             int bitsLeft = 0;
 
             for (char c : encoded) {
@@ -74,21 +74,12 @@ namespace snodec {
                 bitsLeft += 5;
 
                 if (bitsLeft >= 8) {
-                    result.push_back((buffer >> (bitsLeft - 8)) & 0xFF);
+                    result.push_back(static_cast<uint8_t>(buffer >> (bitsLeft - 8)));
                     bitsLeft -= 8;
                 }
             }
 
             return result;
-        }
-
-        std::vector<uint8_t> Totp::hmacSha1(const std::vector<uint8_t>& key, const std::vector<uint8_t>& message) {
-            unsigned char hash[EVP_MAX_MD_SIZE];
-            unsigned int hashLen = 0;
-
-            HMAC(EVP_sha1(), key.data(), key.size(), message.data(), message.size(), hash, &hashLen);
-
-            return std::vector<uint8_t>(hash, hash + hashLen);
         }
 
         uint32_t Totp::generateTotpValue(const std::vector<uint8_t>& secret, uint64_t timeCounter) {
@@ -100,10 +91,24 @@ namespace snodec {
             }
 
             // Calculate HMAC-SHA1
-            std::vector<uint8_t> hash = hmacSha1(secret, message);
+            unsigned char hash[20];
+            if (EVP_Q_mac(nullptr,
+                          "HMAC",
+                          nullptr,
+                          "SHA1",
+                          nullptr,
+                          secret.data(),
+                          secret.size(),
+                          message.data(),
+                          message.size(),
+                          hash,
+                          sizeof(hash),
+                          nullptr) == nullptr) {
+                throw std::runtime_error("Failed to compute HMAC-SHA1");
+            }
 
             // Dynamic truncation (RFC 6238)
-            int offset = hash[hash.size() - 1] & 0x0F;
+            int offset = hash[sizeof(hash) - 1] & 0x0F;
             uint32_t code = ((hash[offset] & 0x7F) << 24) | ((hash[offset + 1] & 0xFF) << 16) | ((hash[offset + 2] & 0xFF) << 8) |
                             (hash[offset + 3] & 0xFF);
 

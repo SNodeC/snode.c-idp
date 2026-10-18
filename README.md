@@ -1,142 +1,44 @@
-# SNode.C Identity Provider (C++)
+# SNode.C Identity Provider
 
-**Live:** https://auth.janeberwein.at
+Jan Nicolas Eberwein’s C++ identity provider and client integration for [SNode.C](https://github.com/SNodeC/snode.c), maintained here as a fork of [jan-eberwein/auth](https://github.com/jan-eberwein/auth).
 
-OAuth2 Authorization Code Flow + PKCE + TOTP MFA + JWT RS256 — implemented entirely in **C++** using the [SNode.C](https://github.com/SNodeC/snode.c) framework. VPS deployment via Docker.
+The project provides an IDP with password login, TOTP, OAuth2 Authorization Code flow with PKCE, RS256 tokens, SQLite persistence, and Google federation, plus a client library for SNode.C applications.
 
-This is the Identity Provider component of the Master Thesis *"SSO & MFA with SNode.C"* by Jan Nicolas Eberwein (FH OÖ, 2025/2026).
+## Documentation
 
-## Features
+Start with the **[step-by-step local deployment walkthrough](docs/local-deployment.md)** to build and run the full IDP and browser application, create accounts, enroll MFA, exercise login/logout and recovery, and back up the deployment.
 
-| Feature | RFC / Standard |
-|---|---|
-| OAuth2 Authorization Code Flow + PKCE | RFC 6749 + RFC 7636 (S256 only) |
-| TOTP Multi-Factor Authentication | RFC 6238 |
-| JWT access tokens (RS256 + JWKS) | RFC 7519, RFC 7517 |
-| PBKDF2-HMAC-SHA256 password hashing | NIST SP 800-132 |
-| AES-256-GCM TOTP secret encryption | NIST SP 800-38D |
-| Rate limiting (login + MFA) | OWASP guidelines |
-| Federated login (Google, Apple, Meta) | OpenID Connect |
-| Password reset flow | — |
-| SQLite backend | — |
-| First-run admin setup with claim token | — |
-| OpenID Connect Discovery | OpenID Core §4 |
-| JWKS endpoint | RFC 7517 |
+Read the **[IDP and client guide](docs/idp-and-client-guide.md)** for configuration, native and Docker deployment, a complete minimal client application, API details, account workflows, operations, and troubleshooting. It documents the inspected source revision and known limitations, including differences from older project documentation. Read its compatibility and limitations sections before deployment.
 
-## Architecture
+To embed the complete IDP, use the **[IdpMiddleware router](docs/idp-middleware.md)** with explicit constructor configuration. The standalone server uses the same implementation, selects its IDP VHost from the issuer URL, and supports an optional [`HOST_REDIRECTS` mapping](docs/idp-and-client-guide.md#host-routing-and-client-redirects) for additional hostnames.
 
-```
-auth.janeberwein.at (HTTPS)
-        │
-        ▼ Caddy reverse proxy (TLS termination)
-        │
-        ▼ 127.0.0.1:8080
-        │
-        ▼ Docker container
-        │
-        ▼ C++ auth_idp binary (SNode.C)
-        │
-        ├── SQLite DB (/app/data/auth.db)
-        └── RSA keys  (/app/keys/)
-```
+## Quick start
 
-## Build & Deploy (VPS)
+The 2.0 API shares one `OAuthClient` between middleware and callback handling, requires MFA, and checks live IDP sessions. Upgrade applications and the IDP together; see the guide for schema and configuration migration.
 
-### Prerequisites
-- Docker 20+ with Compose v2
-- DNS: `auth.janeberwein.at` → VPS IP
-- Caddy (or nginx) configured as reverse proxy
+Use an installed compatible SNode.C framework. The auth code uses its public `Log.h` API; the guide records the tested framework revision and dependency requirements.
 
-### Quick Deploy
+To build only the relying-party client library from this checkout:
 
 ```bash
-# 1. Clone this repo on the VPS
-git clone https://github.com/jan-eberwein/auth.git /opt/apps/auth
-cd /opt/apps/auth
-
-# 2. Configure
-cp .env.example .env
-# Edit .env — set SETUP_CLAIM_TOKEN for first-run admin setup
-
-# 3. Build the C++ binary (takes ~5-10 min on first build, cached after)
-docker compose build
-
-# 4. Start
-docker compose up -d
-
-# 5. Check logs
-docker compose logs -f
+cmake -S . -B /tmp/codex/build/snodec-idp/client -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=/absolute/path/to/compatible/snodec-install \
+  -DCMAKE_INSTALL_PREFIX=/tmp/codex/build/snodec-idp/install-client \
+  -DAUTH_CLIENT_ONLY=ON
+cmake --build /tmp/codex/build/snodec-idp/client --parallel
+cmake --install /tmp/codex/build/snodec-idp/client --component auth-client
 ```
 
-### First Run
-After starting, navigate to `https://auth.janeberwein.at/setup` and enter your `SETUP_CLAIM_TOKEN` to create the initial admin account.
+Applications consume the installed package with:
 
-### Update
-```bash
-cd /opt/apps/auth
-git pull
-docker compose build --no-cache   # rebuild with latest source
-docker compose up -d --force-recreate
+```cmake
+find_package(snodec-auth 2 REQUIRED)
+target_link_libraries(my_application PRIVATE snodec-auth::auth-client)
 ```
 
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `IDP_PORT` | `8080` | Internal HTTP port |
-| `IDP_BASE_URL` | `http://localhost:8080` | Public HTTPS URL |
-| `IDP_ISSUER` | same as BASE_URL | JWT `iss` claim |
-| `IDP_PRIVATE_KEY_PATH` | `/app/keys/private_key.pem` | Auto-generated on first run |
-| `IDP_PUBLIC_KEY_PATH` | `/app/keys/public_key.pem` | Auto-generated on first run |
-| `DB_PATH` | `/app/data/auth.db` | SQLite database path |
-| `TOTP_KEY_PATH` | *(empty)* | AES-256-GCM key for TOTP secrets |
-| `IDP_ALLOWED_REDIRECT_URIS` | localhost variants | Comma-separated OAuth2 redirect URIs |
-| `OAUTH_GOOGLE_CLIENT_ID` | *(empty)* | Google OAuth2 (optional) |
-| `OAUTH_GOOGLE_CLIENT_SECRET` | *(empty)* | Google OAuth2 (optional) |
-| `SMTP_COMMAND` | *(empty = browser display)* | Password reset email command |
-| `SETUP_CLAIM_TOKEN` | *(empty)* | First-run admin bootstrap token |
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/auth/authorize` | GET | OAuth2 authorization endpoint |
-| `/auth/token` | POST | Token exchange (code → JWT) |
-| `/auth/userinfo` | GET | OIDC userinfo (Bearer token) |
-| `/auth/login` | GET / POST | Login page + form handler |
-| `/auth/mfa` | POST | TOTP verification |
-| `/auth/register` | GET / POST | Registration |
-| `/auth/enroll/totp` | POST | TOTP enrollment confirmation |
-| `/auth/logout` | POST | Session logout |
-| `/auth/forgot-password` | GET / POST | Password reset request |
-| `/auth/reset-password` | GET / POST | Password reset form |
-| `/auth/federated/:provider` | GET | Federated login (google/apple/meta) |
-| `/dashboard` | GET | User dashboard |
-| `/settings` | GET / POST | Account settings |
-| `/setup` | GET / POST | First-run admin setup |
-| `/.well-known/jwks.json` | GET | JWKS public keys |
-| `/.well-known/openid-configuration` | GET | OIDC discovery |
-| `/health` | GET | Health check |
-
-## Caddy Configuration
-
-Already configured on the VPS:
-```
-auth.janeberwein.at {
-    reverse_proxy 127.0.0.1:8080
-}
-```
-
-## Build Details
-
-The Docker build is a standalone, multi-stage build against **vanilla upstream SNode.C**. No fork is required:
-1. Clones and installs [SNodeC/snode.c](https://github.com/SNodeC/snode.c) (`master`) into `/opt/snodec`
-2. Builds this repo on its own via `find_package(snodec)`, using the vendored `db-sqlite` and Nayuki `qrcodegen` sources under `src/`
-3. Compiles the `auth_idp` target with CMake + Ninja
-4. Copies the binary and the snodec shared libraries into a minimal Ubuntu 24.04 runtime image
-
-**Compiler requirements:** GCC ≥ 12.2 or Clang ≥ 13.0, C++20
+Set `AUTH_CLIENT_ONLY=OFF` in a separate build directory to build the IDP too. Building does not configure or start an IDP. Follow the guide for signing keys, persistent storage, issuer/callback configuration, and launch instructions. The repository also includes a Dockerfile and Compose configuration.
 
 ## License
 
-MIT — Copyright © 2025/2026 Jan Nicolas Eberwein & Volker Chr. (SNode.C)
+MIT — Copyright © 2025/2026 Jan Nicolas Eberwein & Volker Chr. (SNode.C). See individual source files for their notices.

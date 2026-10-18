@@ -12,12 +12,16 @@ namespace snodec {
             JwtSigner(const std::string& issuer, const std::string& privateKeyPem);
 
             std::string sign(const JwtClaims& claims);
+            std::string jwks() const;
+            std::string publicKey() const;
 
         private:
             std::string issuer_;
             std::string privateKeyPem_;
 
-            static std::string base64UrlEncode(const std::string& input);
+            std::string keyId_;
+            std::string jwks_;
+            std::string publicKey_;
         };
 
     } // namespace auth

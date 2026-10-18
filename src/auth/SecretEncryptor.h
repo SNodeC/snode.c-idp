@@ -225,9 +225,8 @@ namespace snodec {
                 }
                 std::vector<unsigned char> key(KEY_LENGTH);
                 f.read(reinterpret_cast<char*>(key.data()), KEY_LENGTH);
-                if (f.gcount() != KEY_LENGTH) {
-                    throw std::runtime_error("SecretEncryptor: key file too short (need " +
-                                             std::to_string(KEY_LENGTH) + " bytes)");
+                if (f.gcount() != KEY_LENGTH || f.peek() != std::char_traits<char>::eof()) {
+                    throw std::runtime_error("SecretEncryptor: key file must contain exactly " + std::to_string(KEY_LENGTH) + " bytes");
                 }
                 return key;
             }
@@ -243,6 +242,9 @@ namespace snodec {
 
             static std::vector<unsigned char> fromHex(const std::string& hex) {
                 std::vector<unsigned char> bytes;
+                if (hex.size() % 2 != 0 || hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+                    throw std::runtime_error("SecretEncryptor: invalid hex encoding");
+                }
                 for (size_t i = 0; i + 1 < hex.length(); i += 2) {
                     bytes.push_back(static_cast<unsigned char>(
                         std::strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
