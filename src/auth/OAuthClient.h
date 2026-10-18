@@ -14,6 +14,7 @@ namespace snodec::auth {
             std::string state;
             std::string authorizeUrl;
         };
+        std::string accountUrl(const std::string& localReturn) const;
         Login begin(const std::string& localReturn);
         void complete(const std::string& state,
                       const std::string& browserState,

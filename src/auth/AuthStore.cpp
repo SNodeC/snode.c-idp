@@ -40,6 +40,19 @@ namespace snodec::auth {
         }
     }
 
+    std::string AuthStore::accountReturn(const std::string& clientId, const std::string& target) const {
+        require(target.size() <= 2048 && clients_.contains(clientId), "Unknown account navigation client");
+        const auto destination = endpoint(target);
+        bool allowed = false;
+        for (const auto& callback : clients_.at(clientId)) {
+            const auto registered = endpoint(callback.get<std::string>());
+            allowed = allowed ||
+                      (destination.tls == registered.tls && destination.host == registered.host && destination.port == registered.port);
+        }
+        require(allowed, "Account return URL must belong to the client");
+        return target;
+    }
+
     void AuthStore::execute(const std::string& sql, const std::vector<std::string>& args) {
         require(db_.exec(sql, args), "Database operation failed");
     }

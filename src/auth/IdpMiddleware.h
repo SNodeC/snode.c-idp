@@ -12,7 +12,6 @@ namespace snodec::auth {
         std::string databasePath;
         std::string privateKeyPath;
         std::string totpKeyPath;
-        std::string protectedAppUrl;
         std::string smtpCommand;
         std::string googleClientId;
         std::string googleClientSecret;

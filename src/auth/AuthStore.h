@@ -6,6 +6,7 @@ namespace snodec::auth {
     class AuthStore {
     public:
         explicit AuthStore(database::sqlite::SqliteDatabase& db, Json clients);
+        std::string accountReturn(const std::string& clientId, const std::string& target) const;
         Json authorization(const Json& input) const;
         std::string begin(const Json& context);
         Json flow(const std::string& browserToken);

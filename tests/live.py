@@ -23,7 +23,7 @@ import threading
 import subprocess
 import time
 import traceback
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -176,6 +176,105 @@ def browser_flow(browser):
     page.get_by_role("button", name="Verify", exact=True).click()
     page.wait_for_url(APP + "/private")
     assert page.locator("body").inner_text() == "MFA authorized"
+    context.close()
+
+
+def account_navigation(browser):
+    context = browser.new_context()
+    first = context.new_page()
+    first.set_default_timeout(15000)
+    # Registration and enrollment reached from settings retain the application's destination.
+    first.goto(APP + "/account")
+    first.get_by_role("link", name="Register", exact=True).click()
+    for name, value in [("username", "navigation-user"), ("email", "navigation@example.test"),
+                        ("password", PASSWORD), ("confirm_password", PASSWORD)]:
+        first.locator("[name=" + name + "]").fill(value)
+    first.get_by_role("button", name="Register", exact=True).click()
+    secret = next(p.strip() for p in first.locator("p").all_text_contents()
+                  if re.fullmatch("[A-Z2-7]{16,}", p.strip()))
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Activate", exact=True).click()
+    first.wait_for_url(re.compile(re.escape(IDP + "/settings?")))
+    target = APP + "/private?section=account&next=%2Fhome"
+    back = first.get_by_role("link", name="Back to application", exact=True)
+    assert back.get_attribute("href") == target
+    second = context.new_page()
+    second.goto(SECOND + "/account")
+    other_target = SECOND + "/private?section=account&next=%2Fhome"
+    assert second.get_by_role("link", name="Back to application", exact=True).get_attribute("href") == other_target
+    # Forms, feedback redirects and subpage cancellation retain each tab's own destination.
+    first.locator("[name=email]").fill("navigation-updated@example.test")
+    first.get_by_role("button", name="Save Profile", exact=True).click()
+    first.wait_for_url(re.compile("msg="))
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Delete", exact=True).click()
+    first.locator("[name=confirm_username]").fill("wrong-name")
+    first.locator("[name=password]").fill(PASSWORD)
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Delete my account permanently", exact=True).click()
+    assert "username did not match" in first.locator("body").inner_text()
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Cancel", exact=True).click()
+    first.get_by_role("link", name="Disable", exact=True).click()
+    first.get_by_role("link", name="Cancel and Return", exact=True).click()
+    first.get_by_role("link", name="Dashboard", exact=True).click()
+    first.get_by_role("link", name="Settings", exact=True).click()
+    assert back.get_attribute("href") == target
+    first.reload()
+    assert back.get_attribute("href") == target
+    second.get_by_role("link", name="Back to application", exact=True).click()
+    second.wait_for_url(other_target)
+    assert second.locator("body").inner_text() == "MFA authorized"
+    back.click()
+    first.wait_for_url(target)
+    assert first.locator("body").inner_text() == "MFA authorized"
+    first.goto(IDP + "/settings")
+    assert first.get_by_role("link", name="Back to application", exact=True).count() == 0
+    # Reject foreign origins, client swaps and unsafe URL forms before any profile mutation.
+    for client, destination in [("live-app", SECOND + "/private"), ("unknown", target),
+                                ("live-app", "https://evil.example/private"),
+                                ("live-app", "javascript:alert(1)"), ("live-app", "//evil.example")]:
+        response = first.goto(IDP + "/settings?" + urlencode({"client_id": client, "return": destination}))
+        assert response.status == 400
+    first.goto(APP + "/account")
+    response = first.evaluate("""async (target) => {
+        const query = new URLSearchParams({client_id: 'live-app', return: 'https://evil.example/'});
+        const body = new URLSearchParams({username: 'navigation-user', email: 'changed@example.test'});
+        return (await fetch('/settings/profile?' + query, {method: 'POST', body})).status;
+    }""", target)
+    assert response == 400
+    first.reload()
+    assert first.locator("[name=email]").input_value() == "navigation-updated@example.test"
+    # Disabling MFA revokes the session; optional enrollment and skip keep the return journey.
+    first.get_by_role("link", name="Disable", exact=True).click()
+    first.locator("[name=password]").fill(PASSWORD)
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Verify & Disable MFA", exact=True).click()
+    first.locator("[name=username]").fill("navigation-user")
+    first.locator("[name=password]").fill(PASSWORD)
+    first.get_by_role("button", name="Sign in", exact=True).click()
+    first.get_by_role("link", name="Enable", exact=True).click()
+    assert first.get_by_role("button", name="Skip", exact=True).evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)"
+    first.get_by_role("button", name="Skip", exact=True).click()
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Enable", exact=True).click()
+    secret = next(p.strip() for p in first.locator("p").all_text_contents()
+                  if re.fullmatch("[A-Z2-7]{16,}", p.strip()))
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Activate", exact=True).click()
+    assert back.get_attribute("href") == target
+    # Password changes revoke sessions; reauthentication returns to settings with the link intact.
+    first.locator("[name=current_password]").fill(PASSWORD)
+    first.locator("[name=new_password]").fill(PASSWORD + "-changed")
+    first.locator("[name=confirm_password]").fill(PASSWORD + "-changed")
+    first.get_by_role("button", name="Change Password", exact=True).click()
+    first.locator("[name=username]").fill("navigation-user")
+    first.locator("[name=password]").fill(PASSWORD + "-changed")
+    first.get_by_role("button", name="Sign in", exact=True).click()
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Verify", exact=True).click()
+    first.wait_for_url(re.compile(re.escape(IDP + "/settings?")))
+    assert back.get_attribute("href") == target
     context.close()
 
 
@@ -771,6 +870,7 @@ def main():
                     lambda: browser_flow(browser),
                 ),
                 ("binding, CSRF and disabled providers", binding),
+                ("account return navigation and tab isolation", lambda: account_navigation(browser)),
                 ("password and MFA login", password_and_mfa),
                 (
                     "reset and account-security revocation",
