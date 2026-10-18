@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit systemd/Nginx deployment. Package installation never calls this file."""
+"""Explicit systemd deployment with direct SNode.C TLS. Package installation never calls this file."""
 import argparse
 from contextlib import closing
 import getpass
@@ -21,11 +21,9 @@ import urllib.request
 from urllib.parse import urlsplit
 from email.message import EmailMessage
 
-MARKER = '# Managed by snodec-idp-deploy\n'
 CONFIG = Path('/etc/snodec-idp')
 DATA = Path('/var/lib/snodec-idp')
-SITE = Path('/etc/nginx/conf.d/snodec-idp.conf')
-WEBROOT = Path('/var/www/snodec-idp-acme')
+SYSTEMD = Path('/etc/systemd/system')
 CERT = Path('/etc/letsencrypt/live/snodec-idp')
 
 
@@ -47,9 +45,30 @@ def https_url(value):
             or parsed.fragment or any(c.isspace() or ord(c) < 32 or c in '\\";$' for c in value)):
         raise ValueError('Expected a public HTTPS URL without credentials or fragment')
     hostname(parsed.hostname)
-    if parsed.port not in (None, 443):
-        raise ValueError('Public deployment uses HTTPS port 443')
+    if parsed.port is not None:
+        port_number(parsed.port)
     return value
+
+
+def port_number(value):
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError('Enter a TCP port between 1 and 65535')
+    return port
+
+
+def https_origin(host, port):
+    origin = 'https://' + host + (':' + str(port) if port != 443 else '')
+    return origin
+
+
+def http_targets(config):
+    origin = https_origin(config['hostname'], config['idp_port'])
+    targets = {config['hostname']: origin}
+    targets.update({host: https_origin(host, config['idp_port']) for host in config.get('redirects', {})})
+    if config.get('example'):
+        targets[config['example']['hostname']] = https_origin(config['example']['hostname'], config['example']['port'])
+    return targets
 
 
 def single_line(value):
@@ -66,13 +85,15 @@ def email(value):
 
 def validate(config):
     allowed = {'hostname', 'acme_email', 'accept_acme_terms', 'clients', 'redirects',
-               'google_client_id', 'google_client_secret', 'smtp_command', 'example', 'tls', 'mail', 'public_ips'}
+               'google_client_id', 'google_client_secret', 'smtp_command', 'example', 'tls', 'mail', 'public_ips', 'idp_port'}
     if set(config) - allowed:
         raise ValueError('Unknown deployment configuration field')
     hostname(config['hostname'])
+    if not isinstance(config.get('idp_port'), int) or port_number(config['idp_port']) == 80:
+        raise ValueError('Set idp_port for the direct HTTPS listener, e.g. 8088; port 80 is reserved for HTTP redirects')
     tls = config.get('tls', {'mode': 'letsencrypt'})
-    if tls.get('mode') not in ('letsencrypt', 'files', 'proxy'):
-        raise ValueError('TLS mode must be letsencrypt, files or proxy')
+    if tls.get('mode') not in ('letsencrypt', 'files'):
+        raise ValueError('TLS mode must be letsencrypt or files; applications terminate TLS directly')
     if tls['mode'] == 'letsencrypt':
         email(config.get('acme_email', ''))
         if config.get('accept_acme_terms') is not True:
@@ -118,10 +139,12 @@ def validate(config):
         hosts.add(host)
     example = config.get('example')
     if example:
-        if set(example) != {'hostname', 'client_id'}:
-            raise ValueError('example requires hostname and client_id only')
+        if set(example) != {'hostname', 'client_id', 'port'}:
+            raise ValueError('example requires hostname, client_id and port')
+        if not isinstance(example['port'], int) or port_number(example['port']) in (80, config['idp_port']):
+            raise ValueError('Application HTTPS port must differ from IDP and HTTP redirect ports')
         host = hostname(example['hostname'])
-        if host in hosts or 'https://' + host + '/auth/callback' not in config['clients'].get(example['client_id'], []):
+        if host in hosts or https_origin(host, example['port']) + '/auth/callback' not in config['clients'].get(example['client_id'], []):
             raise ValueError('Example needs a distinct hostname and a registered callback')
         hosts.add(host)
     for key in ('google_client_id', 'google_client_secret', 'smtp_command'):
@@ -168,55 +191,12 @@ def provision_keys(data):
     return public
 
 
-def nginx_config(config, tls):
-    hosts = validate(config)
-    certificate, private_key = certificate_paths(config)
-    result = MARKER + 'server {\n    listen 80;\n    listen [::]:80;\n    server_name ' + ' '.join(hosts) + ';\n'
-    result += '    location ^~ /.well-known/acme-challenge/ { root ' + str(WEBROOT) + '; }\n'
-    result += '    location / { return 308 https://$host$request_uri; }\n}\n'
-    if tls:
-        groups = [(sorted({config['hostname'], *config.get('redirects', {})}), 8083)]
-        if config.get('example'):
-            groups.append(([config['example']['hostname']], 8084))
-        for names, port in groups:
-            result += ('server {\n    listen 443 ssl;\n    listen [::]:443 ssl;\n    server_name ' + ' '.join(names) + ';\n'
-                       '    ssl_certificate ' + str(certificate) + ';\n'
-                       '    ssl_certificate_key ' + str(private_key) + ';\n'
-                       '    ssl_protocols TLSv1.2 TLSv1.3;\n'
-                       '    location / {\n        proxy_pass http://127.0.0.1:' + str(port) + ';\n'
-                       '        proxy_set_header Host $host;\n        proxy_set_header Origin $http_origin;\n'
-                       '        proxy_set_header X-Forwarded-Proto https;\n    }\n}\n')
-    return result
-
-
-def install_site(content):
-    previous = SITE.read_text() if SITE.exists() else None
-    if previous is not None and not previous.startswith(MARKER):
-        raise ValueError('Refusing to overwrite an unmanaged Nginx site')
-    if content is None:
-        SITE.unlink(missing_ok=True)
-    else:
-        write(SITE, content, 0o644)
-    try:
-        run('nginx', '-t')
-    except subprocess.CalledProcessError:
-        if previous is None:
-            SITE.unlink(missing_ok=True)
-        else:
-            write(SITE, previous, 0o644)
-        raise
-    run('systemctl', 'enable', '--now', 'nginx')
-    run('systemctl', 'reload', 'nginx')
-
-
 def preflight(config):
-    hosts = validate(config)
+    validate(config)
     if os.geteuid() != 0:
         raise ValueError('Deployment must run as root; --check needs no privilege')
     mode = config.get('tls', {}).get('mode', 'letsencrypt')
     binaries = ['systemctl', 'systemd-sysusers', 'openssl', 'auth_idp']
-    if mode != 'proxy' or SITE.exists():
-        binaries.append('nginx')
     if mode == 'letsencrypt':
         binaries.append('certbot')
     if config.get('mail'):
@@ -226,15 +206,12 @@ def preflight(config):
             raise ValueError('Install required program: ' + binary)
     if config.get('example') and not shutil.which('minimal-mfa-app'):
         raise ValueError('Install snodec-idp-example before deploying it')
-    if SITE.exists() and not SITE.read_text().startswith(MARKER):
-        raise ValueError('Nginx site file is not owned by this deployment')
-    effective = run('nginx', '-T') if mode != 'proxy' else ''
-    for section in effective.split('# configuration file '):
-        if not section.startswith(str(SITE) + ':'):
-            for names in re.findall(r'\bserver_name\s+([^;]+);', section):
-                if set(names.split()) & set(hosts):
-                    raise ValueError('Hostname already belongs to Nginx configuration ' + section.split(':', 1)[0]
-                                     + '. Keep it with TLS mode proxy, or move that site out of Nginx include paths and retry.')
+    services = ['snodec-idp'] + (['snodec-idp-example'] if config.get('example') else [])
+    for service in services:
+        unit = Path(run('systemctl', 'show', service, '--property=FragmentPath', '--value').strip())
+        if not unit.is_file() or 'tls --cert %d/tls-cert --cert-key %d/tls-key' not in unit.read_text():
+            raise ValueError('Install rebuilt direct-TLS packages before deploying: ' + service)
+    check_listeners(config)
     if (DATA / 'auth.db').exists() and not all((DATA / 'keys' / key).is_file() for key in ('private.pem', 'totp.key')):
         raise ValueError('Restore original database keys before deployment')
     # Use the distribution's existing renewal scheduler, not a competing timer.
@@ -319,8 +296,6 @@ def deploy(config):
             source.backup(target)
         shutil.copytree(DATA / 'keys', backup / 'keys')
         shutil.copytree(CONFIG, backup / 'configuration')
-        if SITE.exists():
-            shutil.copy2(SITE, backup / 'nginx.conf')
     users = 'u snodec-idp - "SNode.C identity provider" /var/lib/snodec-idp\n'
     if config.get('example'):
         users += 'u snodec-idp-example - "SNode.C MFA example"\n'
@@ -332,44 +307,41 @@ def deploy(config):
     for path in (DATA, DATA / 'keys', *(DATA / 'keys').iterdir(), *DATA.glob('auth.db*')):
         os.chown(path, user.pw_uid, user.pw_gid)
     example = config.get('example')
-    origin = 'https://' + config['hostname']
+    origin = https_origin(config['hostname'], config['idp_port'])
     mail_command = provision_mail(config, user)
-    values = dict(IDP_BASE_URL=origin, IDP_ISSUER=origin, IDP_PORT='8083', DB_PATH=str(DATA / 'auth.db'),
+    values = dict(IDP_BASE_URL=origin, IDP_ISSUER=origin, IDP_PORT=config['idp_port'], HTTP_PORT='80', HTTP_REDIRECTS=json.dumps(http_targets(config)), DB_PATH=str(DATA / 'auth.db'),
                   IDP_PRIVATE_KEY_PATH=str(DATA / 'keys/private.pem'), TOTP_KEY_PATH=str(DATA / 'keys/totp.key'),
                   IDP_CLIENTS=json.dumps(config['clients']), HOST_REDIRECTS=json.dumps(config.get('redirects', {})),
                   OAUTH_GOOGLE_CLIENT_ID=config.get('google_client_id', ''),
                   OAUTH_GOOGLE_CLIENT_SECRET=config.get('google_client_secret', ''), SMTP_COMMAND=mail_command,
-                  PROTECTED_WEBAPP_URL='https://' + example['hostname'] if example else '')
+                  PROTECTED_WEBAPP_URL=https_origin(example['hostname'], example['port']) if example else '')
     write(CONFIG / 'idp.env', environment(values))
     write(CONFIG / 'empty.conf', '', 0o644)
     write(CONFIG / 'public.pem', public, 0o644)
     services = ['snodec-idp']
     if example:
         write(CONFIG / 'example.env', environment(dict(IDP_BASE_URL=origin, APP_CLIENT_ID=example['client_id'],
-              APP_CALLBACK_URL='https://' + example['hostname'] + '/auth/callback', APP_PORT='8084', IDP_PUBLIC_KEY_PATH=str(CONFIG / 'public.pem'))))
+              APP_CALLBACK_URL=https_origin(example['hostname'], example['port']) + '/auth/callback', APP_PORT=example['port'], IDP_PUBLIC_KEY_PATH=str(CONFIG / 'public.pem'))))
         services.append('snodec-idp-example')
     elif (CONFIG / 'example.env').exists():
         run('systemctl', 'disable', '--now', 'snodec-idp-example')
         (CONFIG / 'example.env').unlink()
+    certificate, key = certificate_paths(config)
+    for service in services:
+        write(SYSTEMD / (service + '.service.d') / 'tls.conf',
+              '[Service]\nLoadCredential=tls-cert:' + str(certificate) + '\nLoadCredential=tls-key:' + str(key) + '\n')
+    run('systemctl', 'daemon-reload')
     mode = config.get('tls', {}).get('mode', 'letsencrypt')
     if mode == 'letsencrypt':
-        WEBROOT.mkdir(parents=True, exist_ok=True, mode=0o755)
-        WEBROOT.chmod(0o755)
-        install_site(nginx_config(config, (CERT / 'fullchain.pem').exists()))
+        # Restrict the deploy hook to this certificate; private keys stay root-only.
         write(Path('/etc/letsencrypt/renewal-hooks/deploy/snodec-idp'),
-              '#!/bin/sh\nset -eu\nnginx -t\nsystemctl reload nginx\n', 0o755)
-        previous_umask = os.umask(0o022)
-        try:
-            run('certbot', 'certonly', '--non-interactive', '--agree-tos', '--email', config['acme_email'],
-                '--webroot', '-w', str(WEBROOT), '--cert-name', 'snodec-idp', '--renew-with-new-domains',
-                '-d', ','.join(validate(config)))
-        finally:
-            os.umask(previous_umask)
-    if mode != 'proxy':
-        install_site(nginx_config(config, True))
-    elif SITE.exists():
-        install_site(None)
-    run('systemctl', 'daemon-reload')
+              '#!/bin/sh\nset -eu\nif [ "$RENEWED_LINEAGE" = "' + str(CERT) + '" ]; then\n'
+              '    systemctl try-restart ' + ' '.join(services) + '\nfi\n', 0o755)
+        run('certbot', 'certonly', '--standalone', '--non-interactive', '--agree-tos', '--email', config['acme_email'],
+            '--cert-name', 'snodec-idp', '--renew-with-new-domains',
+            '--pre-hook', 'systemctl stop snodec-idp', '--post-hook', 'systemctl start snodec-idp',
+            '-d', ','.join(validate(config)))
+    check_certificates(config)
     if timer:
         run('systemctl', 'enable', '--now', timer)
     for service in services:
@@ -424,8 +396,8 @@ def nonempty(value):
 
 def address_list(value):
     addresses = [str(ipaddress.ip_address(part.strip())) for part in value.split(',')]
-    if any(not ipaddress.ip_address(address).is_global for address in addresses):
-        raise ValueError('Enter public globally routable IP addresses')
+    if any(not ipaddress.ip_address(address).is_global or ipaddress.ip_address(address).version != 4 for address in addresses):
+        raise ValueError('Enter public globally routable IPv4 addresses; these service units use IPv4 listeners')
     return addresses
 
 
@@ -433,16 +405,20 @@ def collect_config(config):
     print('\nStep 4: Public hostnames and client registration')
     config['hostname'] = ask('IDP hostname', 'The public login service, without https:// or a path. Example: core.snodec.org.',
                              config.get('hostname'), convert=hostname)
+    config['idp_port'] = ask('IDP HTTPS port', 'The IDP listens directly on this public port. Example: 8088. '
+                             'Port 80 is reserved for HTTP redirects and ACME.', config.get('idp_port'), convert=port_number)
     old = config.get('example', {})
     if yes('Deploy the styled example?', 'The example provides a browser test application on a DISTINCT hostname. '
            'Choose no to register an application you already run.', bool(old) if config.get('clients') else None):
         host = ask('Application hostname', 'Create a DNS name pointing to this server. For example core.vchrist.at. '
                    'It must differ from the IDP and must not also be a redirect hostname.', old.get('hostname', ''), convert=hostname)
+        app_port = ask('Application HTTPS port', 'The application serves HTTPS directly; use 443 for the standard HTTPS URL. '
+                       'It must differ from the IDP port.', old.get('port'), convert=port_number)
         client = ask('Application client ID', 'A stable name, not a secret; for example minimal-mfa-app. The callback is registered automatically.',
                      old.get('client_id'), convert=nonempty)
-        config['example'] = {'hostname': host, 'client_id': client}
+        config['example'] = {'hostname': host, 'client_id': client, 'port': app_port}
         callbacks = config.setdefault('clients', {}).setdefault(client, [])
-        callback = 'https://' + host + '/auth/callback'
+        callback = https_origin(host, app_port) + '/auth/callback'
         if callback not in callbacks:
             callbacks.append(callback)
     else:
@@ -470,14 +446,13 @@ def collect_config(config):
             config['redirects'][host] = ask('Destination URL', 'The complete HTTPS destination, for example https://app.example.org/.', convert=https_url)
 
     print('\nStep 5: DNS and certificate ownership')
-    config['public_ips'] = ask('Public IP addresses', 'Copy this server\'s public IPv4 and any IPv6 from your hosting console '
+    config['public_ips'] = ask('Public IP addresses', 'Copy this server\'s public IPv4 address from your hosting console '
                               '(https://console.hetzner.com/ -> project -> server -> Networking). Separate addresses with commas. '
-                              'All configured A/AAAA answers must match these addresses; do not enter localhost.',
+                              'All A records must match; remove AAAA records because these service units listen on IPv4.',
                               ','.join(config.get('public_ips', [])), convert=address_list)
     mode = choice('TLS ownership', 'Choose letsencrypt for automatic public certificates and renewal. Choose files for your existing '
-                  'PEM certificate/key on THIS server. Choose proxy to retain an existing TLS proxy on THIS server; '
-                  'you will integrate its routes and retain responsibility for certificates and renewal.',
-                  ('letsencrypt', 'files', 'proxy'), config.get('tls', {}).get('mode', 'letsencrypt' if 'acme_email' in config else None))
+                  'PEM certificate/key on THIS server. SNode.C terminates TLS directly in both modes.',
+                  ('letsencrypt', 'files'), config.get('tls', {}).get('mode', 'letsencrypt' if 'acme_email' in config else None))
     old_tls = config.get('tls', {})
     config['tls'] = {'mode': mode}
     if mode == 'letsencrypt':
@@ -490,16 +465,16 @@ def collect_config(config):
                 'to this server. Use an absolute path such as /etc/ssl/my-idp/fullchain.pem. It must cover ALL configured hostnames.',
                 old_tls.get('certificate', ''), convert=nonempty)
         config['tls']['private_key'] = ask('TLS private-key PEM path', 'Use the corresponding unencrypted key file on the server '
-                '(for unattended Nginx startup), mode 600. Enter its PATH, not the key contents.',
+                '(for unattended TLS startup), mode 600. Enter its PATH, not the key contents.',
                 old_tls.get('private_key', ''), convert=nonempty)
-        print('Renew these files using your CA process; validate and reload Nginx after replacement. This tool will not install Certbot.')
+        print('Renew these files using your CA process; validate them and restart both SNode.C services after replacement. This tool will not install Certbot.')
 
     print('\nStep 6: Optional Google login')
     if yes('Enable Google login?', 'Local password/TOTP login is always available. Choose yes to configure Google federation.',
            bool(config.get('google_client_id')) if 'google_client_id' in config else None):
         print('Open https://console.cloud.google.com/auth/overview and select/create your project.\n'
               'Configure Branding and Audience; for testing add your test users. Open Clients, create a Web application client.\n'
-              'Add this exact Authorized redirect URI:\nhttps://' + config['hostname'] + '/auth/federated/google/callback\n'
+              'Add this exact Authorized redirect URI:\n' + https_origin(config['hostname'], config['idp_port']) + '/auth/federated/google/callback\n'
               'Copy the client ID and secret from that Web client. Do not use an Android/Desktop client.\n'
               'Help: https://developers.google.com/identity/protocols/oauth2/web-server')
         config['google_client_id'] = ask('Google client ID', 'Enter the full ID ending in .apps.googleusercontent.com.',
@@ -568,40 +543,39 @@ def retry(label, action):
 def check_listeners(config):
     listeners = run('ss', '-H', '-ltnp')
     print(listeners)
-    mode = config.get('tls', {}).get('mode', 'letsencrypt')
+    owners_by_port = {80: 'snodec-idp', config['idp_port']: 'snodec-idp'}
+    if config.get('example'):
+        owners_by_port[config['example']['port']] = 'snodec-idp-example'
     for line in listeners.splitlines():
         fields = line.split()
         if len(fields) < 5:
             raise ValueError('Cannot parse listener inventory from ss')
-        address, port = fields[3].rsplit(':', 1)
-        if port in ('8083', '8084'):
-            service = 'snodec-idp' if port == '8083' else 'snodec-idp-example'
-            pid = run('systemctl', 'show', service, '--property=MainPID', '--value').strip()
+        port = int(fields[3].rsplit(':', 1)[1])
+        if port in owners_by_port:
+            pid = run('systemctl', 'show', owners_by_port[port], '--property=MainPID', '--value').strip()
             owners = re.findall(r'pid=(\d+)', line)
-            if address not in ('127.0.0.1', '[::1]', '::1') or pid == '0' or not owners or set(owners) != {pid}:
-                raise ValueError('Port ' + port + ' is occupied outside the managed loopback service. '
-                                 'Resolve its ownership before retrying; this tool will not stop unrelated services.')
-        elif port in ('80', '443') and mode != 'proxy' and '("nginx",' not in line:
-            raise ValueError('Public port ' + port + ' is occupied by another server. '
-                             'Stop/reconfigure it yourself or rerun with TLS ownership proxy.')
+            if pid == '0' or not owners or set(owners) != {pid}:
+                raise ValueError('Port ' + str(port) + ' is occupied outside its managed SNode.C service. '
+                                 'Resolve ownership before retrying; unrelated services will not be stopped.')
 
 
 def network_setup(config):
     retry('DNS validation', lambda: check_dns(config))
     check_listeners(config)
-    print('Ports 8083/8084 are private loopback backends. Ports 80/443 are public. Do not change SSH access.\n'
-          'For hosting firewalls: https://console.hetzner.com/ -> project -> Firewalls -> attached firewall -> inbound TCP 80,443.\n'
+    ports = [80, config['idp_port']] + ([config['example']['port']] if config.get('example') else [])
+    print('SNode.C serves the Internet directly. Allow inbound TCP ports: ' + ', '.join(map(str, ports)) + '. Preserve SSH access.\n'
+          'For hosting firewalls: https://console.hetzner.com/ -> project -> Firewalls -> attached firewall.\n'
           'Instructions: https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall/\n'
-          'A check from this server cannot prove access from the Internet; final checks include a browser on another machine.')
+          'Final checks include a browser on another machine; this server cannot prove Internet reachability.')
     firewall = choice('Host firewall management', 'Choose ufw or firewalld to add HTTP/HTTPS allowances to an ALREADY ACTIVE firewall. '
                       'Choose manual if using nftables/iptables or managing rules elsewhere. No firewall is enabled or flushed.',
                       ('ufw', 'firewalld', 'manual'))
     if firewall == 'ufw':
         if 'Status: active' not in run('ufw', 'status'):
             raise ValueError('UFW is not active; choose manual on rerun or configure it yourself without losing SSH')
-        if yes('Allow HTTP/HTTPS in active UFW?', 'Adds TCP 80 and 443 only; existing SSH rules are untouched.'):
-            run('ufw', 'allow', '80/tcp')
-            run('ufw', 'allow', '443/tcp')
+        if yes('Allow HTTP/HTTPS in active UFW?', 'Adds the listed TCP ports only; existing SSH rules are untouched.'):
+            for port in ports:
+                run('ufw', 'allow', str(port) + '/tcp')
     elif firewall == 'firewalld':
         run('firewall-cmd', '--state')
         print(run('firewall-cmd', '--get-active-zones'))
@@ -609,25 +583,11 @@ def network_setup(config):
                    convert=nonempty)
         if zone not in run('firewall-cmd', '--get-zones').split():
             raise ValueError('Unknown firewalld zone')
-        if yes('Allow HTTP/HTTPS in this zone?', 'Adds runtime and permanent http/https services only; SSH remains untouched.'):
-            for service in ('http', 'https'):
-                run('firewall-cmd', '--zone=' + zone, '--add-service=' + service)
-                run('firewall-cmd', '--permanent', '--zone=' + zone, '--add-service=' + service)
+        if yes('Allow HTTP/HTTPS in this zone?', 'Adds the listed runtime/permanent TCP ports only; SSH remains untouched.'):
+            for port in ports:
+                run('firewall-cmd', '--zone=' + zone, '--add-port=' + str(port) + '/tcp')
+                run('firewall-cmd', '--permanent', '--zone=' + zone, '--add-port=' + str(port) + '/tcp')
     input('Apply any provider/manual firewall rules now, then press Enter to continue: ')
-    if config.get('tls', {}).get('mode') == 'proxy':
-        print('Keep your existing same-server TLS proxy. Configure these routes with Host and Origin preserved,\n'
-              'HTTPS on 443, and HTTP-to-HTTPS redirects on 80. Do NOT expose the backends publicly:')
-        for host in [config['hostname'], *config.get('redirects', {})]:
-            print('  https://' + host + ' -> http://127.0.0.1:8083')
-        if config.get('example'):
-            print('  https://' + config['example']['hostname'] + ' -> http://127.0.0.1:8084')
-        print('Existing certificates and renewal stay with your proxy. Any old site generated by this helper will be removed. '
-              'Unrelated proxy configuration is never overwritten.')
-        input('Integrate these routes in your existing proxy and reload it; press Enter when ready: ')
-    elif shutil.which('getenforce') and run('getenforce').strip() == 'Enforcing':
-        if yes('Allow Nginx proxy connections in SELinux?', 'Sets the persistent httpd_can_network_connect boolean. '
-               'Choose no if your administrator already supplied a narrower policy.'):
-            run('setsebool', '-P', 'httpd_can_network_connect', 'on')
 
 
 def test_mail(config):
@@ -635,7 +595,7 @@ def test_mail(config):
     message = EmailMessage()
     message['To'] = recipient
     message['Subject'] = 'SNode.C IDP deployment mail test'
-    message.set_content('Mail transport test from https://' + config['hostname'] + '. No credentials are included.')
+    message.set_content('Mail transport test from ' + https_origin(config['hostname'], config['idp_port']) + '. No credentials are included.')
     if not shutil.which('systemd-run'):
         raise ValueError('Install systemd-run to test mail in the service sandbox')
     command = '/usr/bin/msmtp --file=' + str(CONFIG / 'mail/msmtprc') + ' -t' if config.get('mail') else config['smtp_command']
@@ -656,24 +616,24 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def verify_http(config):
     opener = urllib.request.build_opener(NoRedirect)
-    for host in validate(config):
+    for host, origin in http_targets(config).items():
         try:
             response = opener.open('http://' + host + '/auth/login', timeout=15)
         except urllib.error.HTTPError as error:
             response = error
         with response:
-            if response.status not in (301, 302, 303, 307, 308) or response.headers.get('Location') != 'https://' + host + '/auth/login':
+            if response.status not in (301, 302, 303, 307, 308) or response.headers.get('Location') != origin + '/auth/login':
                 raise ValueError('HTTP must redirect to the same HTTPS host/path: ' + host)
-    with urllib.request.urlopen('https://' + config['hostname'] + '/health', timeout=15) as response:
+    with urllib.request.urlopen(https_origin(config['hostname'], config['idp_port']) + '/health', timeout=15) as response:
         if json.load(response).get('status') != 'ok':
             raise ValueError('IDP HTTPS health failed')
     if config.get('example'):
-        with urllib.request.urlopen('https://' + config['example']['hostname'] + '/', timeout=15) as response:
+        with urllib.request.urlopen(https_origin(config['example']['hostname'], config['example']['port']) + '/', timeout=15) as response:
             if response.status != 200:
                 raise ValueError('Application HTTPS homepage failed')
     for host, target in config.get('redirects', {}).items():
         try:
-            response = opener.open('https://' + host + '/', timeout=15)
+            response = opener.open(https_origin(host, config['idp_port']) + '/', timeout=15)
         except urllib.error.HTTPError as error:
             response = error
         with response:
@@ -737,10 +697,11 @@ def interactive(path):
     report['checks']['https'] = 'passed from server; external browser test still required'
     if mode == 'letsencrypt':
         checked_step(report, report_path, 'Certificate renewal dry-run', lambda: run('certbot', 'renew', '--cert-name', 'snodec-idp', '--dry-run'))
+        checked_step(report, report_path, 'HTTPS after renewal', lambda: verify_http(config))
         report['checks']['renewal'] = 'dry-run passed'
     else:
         report['checks']['renewal'] = choice('Certificate renewal',
-            'For your certificate provider/proxy, configure and test its renewal and reload process now. '
+            'For your certificate provider, configure and test renewal followed by restarting the SNode.C services. '
             'Record passed only after verifying it; this helper cannot test another provider automatically.',
             ('passed', 'failed', 'pending')) + ' (operator report)'
         write(report_path, json.dumps(report, indent=2) + '\n')
@@ -751,9 +712,9 @@ def interactive(path):
         report['checks']['mail'] = 'disabled by operator'
     print('Open the application in a browser on ANOTHER machine (outside the server network).\n'
           'The following answers are recorded as operator reports, not automated authentication tests.')
-    app = 'https://' + config['example']['hostname'] if config.get('example') else 'https://' + urlsplit(next(iter(config['clients'].values()))[0]).netloc
+    app = https_origin(config['example']['hostname'], config['example']['port']) if config.get('example') else 'https://' + urlsplit(next(iter(config['clients'].values()))[0]).netloc
     browser_checks = {
-        'external HTTPS': 'Open ' + app + ' and https://' + config['hostname'] + '/health; check trusted certificates and redirects.',
+        'external HTTPS': 'Open ' + app + ' and ' + https_origin(config['hostname'], config['idp_port']) + '/health; check trusted certificates and redirects.',
         'registration and MFA': 'Click Sign in, create a local account, scan its QR code with an authenticator, enter a TOTP and reach the protected application.',
         'logout and login': 'Sign out, then sign in again and confirm the protected application requires authentication.',
     }

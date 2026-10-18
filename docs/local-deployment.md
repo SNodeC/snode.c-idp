@@ -260,7 +260,7 @@ chmod 600 "$DEMO_DIR/idp.env"
 The standalone server selects its IDP VHost from `IDP_BASE_URL`.
 `HOST_REDIRECTS` optionally maps other hostnames to fixed client URLs; `{}` keeps
 the single-IDP setup. See [host routing and redirects](idp-and-client-guide.md#host-routing-and-client-redirects)
-for multiple hostnames, matching rules and proxy/health-check requirements.
+for multiple hostnames, matching rules and TLS/health-check requirements.
 The local URLs and OAuth callback paths remain unchanged.
 
 `DEMO_DIR` must be exported before sourcing this file. The IDP does not load this
@@ -608,14 +608,7 @@ middleware and OAuth endpoints are documented in the
 Use the shared client policy for additional protected routes; do not hand-roll
 JWT or MFA checks.
 
-For LAN/public deployment, terminate HTTPS for both public origins, register the
-exact HTTPS callback, update the app's issuer/callback, deploy matching trust and
-configure native outbound TLS verification. Keep backend listeners private and
-preserve the browser Origin through the proxy. Google needs its corresponding
-HTTPS IDP callback registered too. This local HTTP recipe is not a public hosting
-configuration. The [deployment reference](idp-and-client-guide.md#docker-and-operational-lifecycle)
-covers Docker and operational constraints; its Compose default uses port 8080,
-so do not combine its defaults with this port-8083 recipe unchanged.
+For public deployment, use direct SNode.C HTTPS listeners for both origins, register the exact HTTPS callback and deploy matching signing-key trust. The [ten-step package guide](package-deployment.md#banner) covers the interactive script, public ports, certificates, Google and mail. The [container reference](idp-and-client-guide.md#docker-and-operational-lifecycle) uses direct HTTPS on port 8088. This localhost HTTP recipe remains a development configuration; do not expose it publicly unchanged.
 
 There is no invitation/approval system, administrative account-management UI,
 email-verification flow, recovery-code flow, provider-linking UI or complete

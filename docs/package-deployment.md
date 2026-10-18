@@ -8,7 +8,7 @@
 
 This is the ten-step binary-package deployment procedure for `core.snodec.org`, its browser application and optional redirect hostnames. It follows the [project-specific Packages installation guides](https://github.com/SNodeC/Packages/blob/main/docs/installation/README.md#banner). Availability is per distribution and architecture; check step 1 before installing.
 
-The [interactive shell script](../scripts/deploy-core-snodec-org.sh) executes these ten steps using the same [deployment helper](../scripts/deploy.py) installed by the server package. It asks explained questions, saves configuration, provisions services and records verification results. External provider actions (DNS, Google credentials, hosting firewall and an existing proxy) pause for you to complete them; the script cannot administer those accounts without access.
+The [interactive shell script](../scripts/deploy-core-snodec-org.sh) executes these ten steps using the same [deployment helper](../scripts/deploy.py) installed by the server package. It asks explained questions, saves configuration, provisions services and records verification results. External provider actions (DNS, Google credentials, hosting firewall) pause for you to complete them; the script cannot administer those accounts without access.
 
 Download **only the shell script** from the reviewed commit onto your server:
 
@@ -26,7 +26,7 @@ sudo bash deploy-core-snodec-org.sh
 
 The shell installs Python and download tools, fetches its pinned matching helper automatically, and runs the interactive setup. You do not download or execute Python separately. Temporary downloads are removed on exit; a failed download stops setup before the project installer runs. Rerun the same shell script to adjust saved configuration.
 
-Use a published commit containing the updated script and helper. This allows setup fixes to run with the available binary packages before the next package release. On Debian Sid, append `--suite sid` to the shell invocation; use `--suite forky` if Forky is misdetected. Neither option upgrades the OS.
+**Install packages rebuilt with direct TLS before using this procedure.** The former loopback/Nginx packages (including `2.0.2-5~trixie`) cannot provide this deployment. Updating the downloaded helper alone is insufficient; it rejects their service units. Wait for the corrected packages to be published, then use a published commit containing the matching script and helper. On Debian Sid, append `--suite sid` to the shell invocation; use `--suite forky` if Forky is misdetected. Neither option upgrades the OS.
 
 The ten steps below explain what the script does, which answers it needs and which external actions you must complete. Commands within those steps are for manual installation or verification; do not repeat installation commands while the script is handling them. Commands use `sudo`; omit it when logged in as root. If `curl` is missing when downloading the script, install it and `ca-certificates` using your distribution's commands in step 2.
 
@@ -39,7 +39,7 @@ The ten steps below explain what the script does, which answers it needs and whi
 | `snodec-idp-server-dev` | `server-dev` | Embeddable IDP library and its client development dependency |
 | `snodec-idp-example` | `example` | Optional styled application, static assets and systemd unit |
 
-This walkthrough selects `server` and `example`. Development packages are unnecessary for running them. Client development does not install the IDP server. Certificate tooling is an operator choice: Certbot is not an IDP package dependency. The helper supports Let's Encrypt, existing PEM certificates with managed Nginx, and an existing same-server TLS proxy.
+This walkthrough selects `server` and `example`. Development packages are unnecessary for running them. Client development does not install the IDP server. Certificate tooling is an operator choice: Certbot is not an IDP package dependency. The helper supports Let's Encrypt or existing PEM certificates. SNode.C serves HTTPS directly; neither Nginx nor Certbot is a package dependency.
 
 ## 1. Check package availability
 
@@ -107,47 +107,44 @@ Or on Fedora/Rocky:
 rpm -q snodec-idp snodec-idp-example
 ```
 
-Installing the IDP packages does not provision or start their services. Distribution dependency packages such as Nginx may have their own installation hooks. Repository-only preparation remains available as `install.sh --prepare`, but is unnecessary before the project-specific installer.
+Installing the IDP packages does not provision or start their services. Repository-only preparation remains available as `install.sh --prepare`, but is unnecessary before the project-specific installer.
 
 ## 4. Choose the application hostname and redirects
 
-`core.snodec.org` serves the IDP. Choose a distinct application hostname: cookies are not isolated by port. The example callback must be exactly `https://APPLICATION_HOST/auth/callback`.
+`core.snodec.org` serves the IDP on configurable port **8088**, and `core.vchrist.at` serves the application on configurable port **443**. Both listeners use the same server IP directly. The example callback is exactly `https://core.vchrist.at/auth/callback`. For another application port, include that port in the callback. Keep distinct hostnames: browser cookies are not isolated by port.
 
 `core.vchrist.at` can serve the application **or** redirect to it. If it is the application hostname, remove its entry from `redirects`; one hostname cannot have both roles. Otherwise set its redirect destination to the real application URL. Enter your actual hostnames at the prompts; names such as `app.example.org` are explanatory examples.
 
 ## 5. Verify DNS, ports and web-server ownership
 
-Verify the existing A/AAAA records for `core.snodec.org` reach this root server. Check the application and every redirect hostname too: all configured names are included in the certificate. Remove incorrect AAAA records rather than relying on IPv4 fallback.
+Point the A records for the IDP, application and any redirect hostname to this server's public IPv4 address. These packaged services bind IPv4 (`0.0.0.0`); remove AAAA records for these names unless you separately configure and verify IPv6 listeners. All configured hostnames need certificate coverage.
 
-Allow inbound TCP 80 and 443 through both provider and host firewalls. Port 80 handles ACME HTTP-01 validation and redirects other requests to HTTPS. Keep backend ports 8083/8084 private; services bind to loopback. Inspect existing listeners with `sudo ss -ltnp` and ensure those internal ports are available.
+Allow inbound TCP **80, 443 and 8088** through provider and host firewalls for this example. Substitute your selected HTTPS ports if different. The IDP owns port 80 and redirects recognized hostnames to their configured HTTPS origins, preserving path and query. Unknown hostnames receive 404. On the IDP HTTPS port, optional `redirects` instead send the configured fixed destination with status 303.
 
-Copy the server's public IPv4 and any IPv6 from [Hetzner Console](https://console.hetzner.com/) → project → server → Networking. The wizard asks for these as `public_ips`, resolves every hostname and rejects unexpected A/AAAA addresses. Correct DNS at your domain's DNS provider and retry if needed. Port checks reject unrelated owners of backend ports and non-Nginx public listeners when managed Nginx is selected; no unrelated service is stopped.
+Copy the public IPv4 address from [Hetzner Console](https://console.hetzner.com/) → project → server → Networking. The wizard records `public_ips`, checks every DNS answer and inspects listeners with `ss -ltnp`. Unrelated owners of any required port are rejected; no unrelated service is stopped. Neither application uses a reverse proxy.
 
-The wizard can add HTTP/HTTPS allowances to an **already active** UFW or selected firewalld zone after confirmation. It never enables or flushes a firewall and leaves SSH rules alone. For nftables/iptables, make the rules yourself. In [Hetzner's firewall setup](https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall/), allow inbound TCP 80 and 443 on the firewall attached to this server. Provider changes require your action; the wizard pauses before proceeding.
+The wizard offers the selected TCP ports to an **already active** UFW or selected firewalld zone after confirmation. It never enables or flushes a firewall and leaves SSH rules alone. Configure nftables/iptables and the [Hetzner firewall](https://docs.hetzner.com/cloud/firewalls/getting-started/creating-a-firewall/) yourself when applicable. The wizard pauses for provider changes before continuing.
 
 Choose certificate ownership explicitly:
 
 | `tls.mode` | Setup action | Renewal owner |
 | --- | --- | --- |
-| `letsencrypt` | Explicitly install Certbot, obtain a certificate covering all configured hosts, configure Nginx | Distribution Certbot timer and generated Nginx reload hook |
-| `files` | Use your absolute full-chain PEM and unencrypted private-key paths; validate trust, expiry, names and key match; configure Nginx | Your CA renewal/reload process |
-| `proxy` | Keep your existing same-server HTTPS proxy; display routes for you to integrate | Your existing proxy/certificate tooling |
+| `letsencrypt` | Explicitly install Certbot and obtain a certificate covering all configured hosts using standalone HTTP-01 on port 80 | Distribution Certbot timer; hooks stop/start the IDP and restart services after renewal |
+| `files` | Validate your full-chain PEM and unencrypted private key: trust, expiry, names and key match | Your CA tooling, followed by restarting the SNode.C services |
 
-For `files`, copy the certificate and chain to a path such as `/etc/ssl/my-idp/fullchain.pem`, and its private key to `/etc/ssl/my-idp/privkey.pem` with mode 600. Paths cannot contain spaces or shell characters. All public hostnames need certificate coverage. Certbot is not installed in files/proxy mode.
+For `files`, supply absolute paths such as `/etc/ssl/my-idp/fullchain.pem` and `/etc/ssl/my-idp/privkey.pem`, without spaces or shell characters. Keep the private key mode 600. Systemd `LoadCredential` provides private copies to the unprivileged service accounts; do not make keys world-readable. Certbot is not installed in this mode.
 
-Managed Nginx uses only `/etc/nginx/conf.d/snodec-idp.conf`. It rejects unrelated content there and exact hostname collisions with other Nginx sites. In proxy mode, the helper removes only its previously generated site, if present, and leaves unrelated proxy configuration alone. Configure HTTPS with Host/Origin preserved: IDP and redirect hosts → `http://127.0.0.1:8083`; optional example host → `http://127.0.0.1:8084`. Redirect HTTP to the same HTTPS host/path. The wizard waits for you to integrate/reload those routes, then verifies HTTPS.
-
-On SELinux-enforcing hosts with managed Nginx, the wizard offers `setsebool -P httpd_can_network_connect on`. You may decline if your administrator supplies a narrower policy. Switching away from Let's Encrypt does not delete existing certificates or disable a shared Certbot timer; review obsolete certificate lineages yourself.
+With Let's Encrypt, issuance and renewal briefly stop the IDP to free port 80 for Certbot, then start it again. The application stays running, although authentication needs the IDP. The renewal deploy hook refreshes service credentials by restarting the active services. Switching certificate ownership does not delete existing certificates or disable a shared timer; review obsolete lineages yourself.
 
 ## 6. Prepare Google login
 
 Open [Google Auth Platform](https://console.cloud.google.com/auth/overview), select or create a project, then configure Branding and Audience. Under Clients, create a **Web application** client with this exact authorized redirect URI:
 
 ```text
-https://core.snodec.org/auth/federated/google/callback
+https://core.snodec.org:8088/auth/federated/google/callback
 ```
 
-This is Google's callback to the IDP, separate from your application's `/auth/callback`. Enter its client ID and secret when prompted; the secret input is hidden. If the Google audience is in testing, configure the intended test users. Choose no at the Google-login prompt to retain local login without federation; in manual configuration, leave both Google fields empty.
+Use the selected IDP port in this URI; the wizard prints the exact value. This is Google's callback to the IDP, separate from your application's `/auth/callback`. Enter its client ID and secret when prompted; the secret input is hidden. If the Google audience is in testing, configure the intended test users. Choose no at the Google-login prompt to retain local login without federation; in manual configuration, leave both Google fields empty.
 
 The IDP requests `openid email profile`. Google identities still require IDP TOTP enrollment; equal-email local accounts are not automatically linked. See [Google federation](local-deployment.md#12-optional-google-login) for account-flow details.
 
@@ -170,19 +167,20 @@ The wizard validates and saves configuration after asking you to proceed. It pro
 | Field | Meaning |
 | --- | --- |
 | `hostname` | Public IDP DNS name, e.g. `core.snodec.org` |
-| `public_ips` | List of this server's public IP addresses; checked against all configured names |
+| `idp_port` | Public IDP HTTPS port, e.g. `8088`; cannot be 80 or the example port |
+| `public_ips` | List of this server's public IPv4 addresses; checked against all configured names |
 | `clients` | Client IDs mapped to lists of exact HTTPS callbacks; no wildcard callbacks |
-| `example` | Optional object with `hostname` and `client_id`; callback must include `https://HOST/auth/callback` |
+| `example` | Optional object with `hostname`, `port` (e.g. `443`) and `client_id`; exact callback includes a nonstandard port |
 | `redirects` | Optional hostname-to-HTTPS-destination mapping |
-| `tls` | Object containing `mode`: `letsencrypt`, `files` or `proxy`; files additionally needs `certificate` and `private_key` paths |
+| `tls` | Object containing `mode`: `letsencrypt` or `files`; files additionally needs `certificate` and `private_key` paths |
 | `acme_email`, `accept_acme_terms` | Required in Let's Encrypt mode; real contact email and explicit acceptance of [ACME terms](https://letsencrypt.org/repository/) |
 | `google_client_id`, `google_client_secret` | Both populated for Google, otherwise empty |
 | `mail` | Optional managed SMTP object with `host`, numeric `port`, `tls` (`starttls` or `implicit`), `username`, `password`, `from`, `test_to` |
 | `smtp_command` | Fixed mail command, or empty; cannot be used together with `mail` |
 
-For backward compatibility, existing noninteractive configurations without `tls` retain Let's Encrypt behavior, and `public_ips` is optional outside the wizard. That compatibility does not supply first-run interactive defaults. On rerun the wizard preserves complete saved callback lists; replacing a list or redirects is explicit. You may edit JSON to remove obsolete clients.
+Existing JSON needs explicit `idp_port` and `example.port` values. The wizard asks for missing values; it does not invent defaults. Noninteractive configurations without `tls` retain Let's Encrypt behavior, and `public_ips` is optional outside the wizard. That compatibility does not supply first-run interactive defaults. On rerun the wizard preserves complete saved callback lists; replacing a list or redirects is explicit. You may edit JSON to remove obsolete clients.
 
-Do not commit secrets or pass them in shell arguments. `idp.env`, `example.env`, msmtp and Nginx configuration, and the public-key export are generated outputs; edit the JSON or rerun the wizard to change them. Protect previous JSON copies and account backups as secrets.
+Do not commit secrets or pass them in shell arguments. `idp.env`, `example.env`, msmtp configuration and systemd TLS credential drop-ins, and the public-key export are generated outputs; edit the JSON or rerun the wizard to change them. Protect previous JSON copies and account backups as secrets.
 
 ## 9. Provision certificates, persistent state and services
 
@@ -198,7 +196,7 @@ Or on Fedora/Rocky:
 sudo dnf install certbot
 ```
 
-Certbot must provide `certbot.timer` or `certbot-renew.timer`. In files/proxy mode, skip Certbot installation and provide the settings from steps 5 and 8. For managed SMTP, install `msmtp` explicitly too (`apt-get install msmtp` or `dnf install msmtp`).
+Certbot must provide `certbot.timer` or `certbot-renew.timer`. In files mode, skip Certbot installation and provide the settings from steps 5 and 8. For managed SMTP, install `msmtp` explicitly too (`apt-get install msmtp` or `dnf install msmtp`).
 
 Validate and deploy:
 
@@ -207,9 +205,9 @@ sudo snodec-idp-deploy /etc/snodec-idp/deployment.json --check
 sudo snodec-idp-deploy /etc/snodec-idp/deployment.json
 ```
 
-`--check` validates configuration only; it does not verify DNS, networking or external credentials. The manual deployment commands require packages containing the reviewed helper revision; until then, use the single-script workflow above. Actual deployment checks prerequisites and hostname ownership, creates service users and initial keys/data, configures loopback listeners and, when selected, managed Nginx, obtains or checks certificates according to your selected mode, and starts services. Let's Encrypt mode enables the existing Certbot renewal timer. Managed Nginx redirects HTTP with status 308 to HTTPS except for ACME challenges. In Let’s Encrypt mode, a renewal deploy hook validates/reloads Nginx.
+`--check` validates configuration only; it does not verify DNS, networking or external credentials. Actual deployment requires rebuilt direct-TLS executables and service units, checks prerequisites and listener ownership, creates service users and initial keys/data, obtains or checks certificates, writes environment files and credential drop-ins, then starts services. Let's Encrypt mode enables the installed Certbot renewal timer. Both programs terminate TLS themselves. The IDP also serves HTTP-to-HTTPS redirects on port 80.
 
-Re-running setup preserves keys and accounts and restarts configured services. A database without its original signing or TOTP key is rejected. Existing-account updates first save a SQLite backup, keys and configuration under `/var/lib/snodec-idp/backups/`. A failed Nginx syntax check restores the previous site file, but deployment is not a complete rollback transaction: earlier provisioning steps may remain. Inspect errors and journals before retrying; never delete account data or keys to recover from a setup failure.
+Re-running setup preserves keys and accounts and restarts configured services. A database without its original signing or TOTP key is rejected. Existing-account updates first save a SQLite backup, keys and configuration under `/var/lib/snodec-idp/backups/`. Deployment is not a complete rollback transaction: earlier provisioning steps may remain after an error. Inspect errors and journals before retrying; never delete account data or keys to recover from a setup failure.
 
 ## 10. Verify HTTPS, renewal and browser flows
 
@@ -221,20 +219,20 @@ For manual checks (Certbot commands apply only to Let's Encrypt):
 
 ```sh
 curl -I http://core.snodec.org/auth/login
-curl --fail https://core.snodec.org/health
-sudo systemctl --no-pager status snodec-idp nginx
+curl --fail https://core.snodec.org:8088/health
+sudo systemctl --no-pager status snodec-idp snodec-idp-example
 sudo systemctl list-timers --all --no-pager 'certbot*'
 sudo certbot renew --cert-name snodec-idp --dry-run
 ```
 
-With managed Nginx, expect HTTP 308 with an HTTPS location and a successful public HTTPS health response without bypassing certificate verification. The renewal dry-run contacts Certbot's staging service; it does not replace the live certificate. Verify HTTPS and redirect behavior on the other configured hosts as well.
+Expect HTTP 308 with `https://core.snodec.org:8088/auth/login` as its location and a successful public HTTPS health response without bypassing certificate verification. The renewal dry-run contacts Certbot's staging service; it does not replace the live certificate, but its pre/post hooks also briefly stop/start the IDP. Check HTTPS again afterwards. Verify HTTPS and redirect behavior on the other configured hosts as well.
 
 Open the application in a browser and complete registration, TOTP enrollment, login back to `/private`, logout/relogin, Google login if enabled, and password reset using actual delivered mail. Check account settings and configured hostname redirects. The [local account-flow walkthrough](local-deployment.md) describes the UI flows; use your public hostnames here instead of localhost URLs. The helper's health check cannot prove Google consent or mail delivery.
 
 For troubleshooting:
 
 ```sh
-sudo journalctl -u snodec-idp -u snodec-idp-example -u nginx
+sudo journalctl -u snodec-idp -u snodec-idp-example
 ```
 
 ## Upgrades, backups and removal
@@ -243,7 +241,7 @@ Upgrade with the normal package manager, then re-run deployment to apply configu
 
 Preserve `/etc/snodec-idp`, `/var/lib/snodec-idp`, and your certificate storage (`/etc/letsencrypt` for Let's Encrypt). Use SQLite’s online backup API or stop the IDP before copying its database. Signing and TOTP encryption keys are inseparable from account recovery; retain them with each database backup. Protect backups as secrets and apply your own retention policy.
 
-To stop serving the deployment, disable `snodec-idp` and, if used, `snodec-idp-example`; remove only the managed Nginx site and validate/reload Nginx. Revoke/delete its certificate through Certbot when appropriate. Removing a package does not erase accounts, keys or configuration.
+To stop serving the deployment, disable `snodec-idp` and, if used, `snodec-idp-example`. Revoke/delete its certificate through Certbot when appropriate. Removing a package does not erase accounts, keys or configuration. If migrating an older proxy deployment, stop and remove only its dedicated proxy configuration after checking it does not serve unrelated applications. The corrected setup does not remove existing proxy installations automatically.
 
 ## Build and CI contract
 

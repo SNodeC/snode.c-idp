@@ -8,7 +8,7 @@
 
 Build, configure and operate the identity provider and its application integration.
 
-For `core.snodec.org` and other public deployments, use the [ten-step binary-package guide](package-deployment.md#banner) and [interactive deployment script](../scripts/deploy-core-snodec-org.sh). The local walkthrough below is for source-based development on localhost.
+For `core.snodec.org` and other public deployments, use the [ten-step binary-package guide](package-deployment.md#banner) and [interactive deployment script](../scripts/deploy-core-snodec-org.sh). SNode.C serves HTTPS directly on configurable ports (for example IDP 8088 and application 443), with certificate choices, Google login, email and verification in that guide. The local walkthrough below is for source-based development on localhost.
 
 ## Sections
 

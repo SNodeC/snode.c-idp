@@ -10,12 +10,12 @@ services:
     container_name: auth-idp
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${IDP_PORT:-8088}:${IDP_PORT:-8088}"
     environment:
       # ── Server ──────────────────────────────────────────────────────
-      - IDP_PORT=8080
-      - IDP_BASE_URL=${IDP_BASE_URL:-https://auth.janeberwein.at}
-      - IDP_ISSUER=${IDP_ISSUER:-https://auth.janeberwein.at}
+      - IDP_PORT=${IDP_PORT:-8088}
+      - IDP_BASE_URL=${IDP_BASE_URL:?Configure the public HTTPS origin including its port}
+      - IDP_ISSUER=${IDP_BASE_URL:?Configure IDP_BASE_URL}
       - HOST_REDIRECTS=${HOST_REDIRECTS:-}
       # ── Paths ───────────────────────────────────────────────────────
       - IDP_PRIVATE_KEY_PATH=/app/keys/private_key.pem
@@ -29,8 +29,11 @@ services:
       - OAUTH_GOOGLE_CLIENT_SECRET=${OAUTH_GOOGLE_CLIENT_SECRET:-}
       # ── SMTP ────────────────────────────────────────────────────────
       - SMTP_COMMAND=${SMTP_COMMAND:-}
+    command: ["/app/auth_idp", "IdpServer", "local", "--host", "0.0.0.0", "tls", "--cert", "/app/tls/fullchain.pem", "--cert-key", "/app/tls/privkey.pem"]
     volumes:
       # Persistent data (survives container restarts and upgrades)
+      - ${TLS_CERTIFICATE:?Set the full-chain PEM path}:/app/tls/fullchain.pem:ro
+      - ${TLS_PRIVATE_KEY:?Set the private-key PEM path}:/app/tls/privkey.pem:ro
       - auth_keys:/app/keys
       - auth_data:/app/data
     healthcheck:

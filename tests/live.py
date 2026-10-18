@@ -579,7 +579,7 @@ def main():
     parser.add_argument(
         "--https",
         action="store_true",
-        help="Use loopback TLS reverse proxies with an isolated test certificate",
+        help="Use direct IDP TLS and loopback client TLS proxies with an isolated test certificate",
     )
     parser.add_argument("--idp", required=True)
     parser.add_argument("--client", required=True)
@@ -671,7 +671,7 @@ def main():
         IDP_BASE_URL=IDP,
         HOST_REDIRECTS="",
         IDP_ISSUER=IDP,
-        IDP_PORT=str(ports[3] if args.https else ports[0]),
+        IDP_PORT=str(ports[0]),
         IDP_PRIVATE_KEY_PATH=str(root / "private.pem"),
         TOTP_KEY_PATH=str(root / "totp.key"),
         DB_PATH=str(root / "auth.db"),
@@ -696,7 +696,7 @@ def main():
     results = []
     try:
         if args.https:
-            for public, backend in zip(ports[:3], ports[3:]):
+            for public, backend in zip(ports[1:3], ports[4:]):
                 proxy = http.server.ThreadingHTTPServer(("127.0.0.1", public), Proxy)
                 proxy.daemon_threads = True
                 proxy.backend = backend
@@ -743,7 +743,8 @@ def main():
                         "local",
                         "--host",
                         "127.0.0.1",
-                    ],
+                    ] + (["tls", "--cert", str(root / "tls.pem"), "--cert-key", str(root / "tls.key")]
+                         if name == "idp" and args.https else []),
                     cwd=root,
                     env=current,
                     stdout=log,

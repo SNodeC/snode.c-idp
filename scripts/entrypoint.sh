@@ -42,8 +42,8 @@ export IDP_PRIVATE_KEY_PATH="$PRIVATE_KEY"
 export IDP_PUBLIC_KEY_PATH="$PUBLIC_KEY"
 
 echo "[entrypoint] Configuration:"
-echo "  IDP_BASE_URL  = ${IDP_BASE_URL:-http://localhost:8080}"
-echo "  IDP_PORT      = ${IDP_PORT:-8080}"
+echo "  IDP_BASE_URL  = ${IDP_BASE_URL:-http://localhost:8083}"
+echo "  IDP_PORT      = ${IDP_PORT:-derived from IDP_BASE_URL}"
 echo "  DB_PATH       = $DB_PATH"
 echo "  PRIVATE_KEY   = $PRIVATE_KEY"
 

@@ -25,15 +25,15 @@ Installation supplies software without opening a public listener. Deployment is 
 | `snodec-idp-server-dev` | Embeddable IDP library and its development dependencies |
 | `snodec-idp-example` | Optional styled relying-party application and assets |
 
-Native DEB/RPM targets use the existing distribution matrix. The deployment helper targets systemd hosts with managed Nginx or an existing proxy; Certbot is optional for Let’s Encrypt; OpenWrt deployment is outside this helper's scope. Package inventory must derive from CPack components, rather than a second hand-maintained package list.
+Native DEB/RPM targets use the existing distribution matrix. The deployment helper targets systemd hosts with direct SNode.C TLS; Certbot is optional for Let’s Encrypt; OpenWrt deployment is outside this helper's scope. Package inventory must derive from CPack components, rather than a second hand-maintained package list.
 
 ## Deployment contract
 
 The operator supplies the public IDP hostname, application hostname/callback registrations, optional hostname redirects and certificate ownership. Let’s Encrypt additionally requires an ACME contact email and acceptance of its terms. Google credentials and mail settings belong in a protected server-side configuration file. They must never enter workflow logs, repository files or command-line arguments.
 
-Nginx terminates HTTPS and forwards the original Host and Origin to a loopback-only IDP. HTTP requests redirect to HTTPS, except for the ACME HTTP-01 challenge location. In Let’s Encrypt mode, Certbot owns certificate issuance and renewal; a deploy hook reloads Nginx after successful renewal. Existing PEM files and an operator-owned same-server proxy are alternative modes; their renewal remains operator-owned. All configured HTTPS redirect hostnames need certificate coverage too.
+SNode.C terminates HTTPS directly in both executables. The IDP public port (for example 8088) and example port (for example 443) are explicit JSON configuration. The IDP also owns port 80 for hostname-aware HTTPS redirects. Certbot standalone temporarily owns port 80 during issuance/renewal by stopping and starting the IDP; a deploy hook restarts active services to load renewed credentials. Existing PEM files are the alternative certificate mode. Systemd credentials keep private keys available to the unprivileged services without loosening source-key permissions. All HTTPS hostnames need certificate coverage. Nginx and Certbot are not package dependencies.
 
-The setup command must validate input and existing web-server ownership before changing configuration. It must not replace unrelated Nginx sites. Configuration validation precedes reloads. Accounts, database files and private keys belong in persistent service-owned storage, outside package payloads. Removal of software does not remove account data.
+The setup command must validate input and existing web-server ownership before changing configuration. It must not stop unrelated listeners. Configuration validation precedes service restarts. Accounts, database files and private keys belong in persistent service-owned storage, outside package payloads. Removal of software does not remove account data.
 
 The optional example is configured with the public IDP URL, its client ID, callback URL and the IDP public verification key. Its account/settings links must follow that configured IDP; private assets remain behind authentication.
 
@@ -49,10 +49,10 @@ The optional example is configured with the public IDP URL, its client ID, callb
 8. After separate authorization, build/publish and verify installation from the signed repository.
 9. Only then deploy to the root server and verify real HTTPS, renewal, Google login, MFA, recovery mail and hostname routing.
 
-Public deployment still requires the server OS/access, existing port 80/443 ownership, application hostname, redirect destinations, Google credentials and mail configuration. Local tests cannot establish that public DNS, ACME issuance or external Google/mail flows work.
+Public deployment still requires the server OS/access, existing ownership of port 80 and the selected HTTPS ports, application hostname, redirect destinations, Google credentials and mail configuration. Local tests cannot establish that public DNS, ACME issuance or external Google/mail flows work.
 
 ## Implementation and deployment status
 
 The styled client is now version-controlled under `examples/minimal-mfa-app`. CPack definitions, deployment helper and package workflow are implemented. The concrete operator procedure is in [Install and deploy the packaged IDP](package-deployment.md#banner). DistributionPackages owns project-specific installer selection, signed repository setup and publication; canonical navigation is maintained in the organization control repository. Certbot is not an IDP package dependency and is installed explicitly for the Let’s Encrypt workflow.
 
-Local verification covers full/client-only builds, installed consumers, authentication tests, generated DEB/RPM contents, disposable deployment tests, Nginx syntax, HTTPS authentication flows and the styled example in Chromium. Check [published IDP target availability](https://github.com/SNodeC/Packages/blob/main/status/snodec-idp.md) before installation. A passing local check does not establish signed publication or successful root-server deployment. Installation from the signed repository, real ACME issuance/renewal, Google consent and external mail delivery must be verified for the selected deployment.
+Local verification covers full/client-only builds, installed consumers, authentication tests, generated DEB/RPM contents, disposable deployment tests, direct TLS listeners, HTTPS authentication flows and the styled example in Chromium. Check [published IDP target availability](https://github.com/SNodeC/Packages/blob/main/status/snodec-idp.md) before installation. A passing local check does not establish signed publication or successful root-server deployment. Installation from the signed repository, real ACME issuance/renewal, Google consent and external mail delivery must be verified for the selected deployment.

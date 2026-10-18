@@ -165,7 +165,10 @@ if(NOT AUTH_CLIENT_ONLY)
                          AUTH_REVISION="${AUTH_REVISION}"
     )
 
-    target_link_libraries(auth_idp PRIVATE auth-idp)
+    find_package(snodec REQUIRED COMPONENTS http-server-express-tls-in)
+    target_link_libraries(
+        auth_idp PRIVATE auth-idp snodec::http-server-express-tls-in
+    )
 
     install(
         TARGETS auth-idp db-sqlite nayuki-qrcodegen

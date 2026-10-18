@@ -306,15 +306,22 @@ def main():
         )
 
     def public_health_probe():
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+            "-subj", "/CN=idp.example", "-addext", "subjectAltName=DNS:idp.example,DNS:localhost",
+            "-keyout", str(root / "tls.key"), "-out", str(root / "tls.pem"),
+        ], check=True, capture_output=True)
         public = dict(
             env,
-            IDP_BASE_URL="https://idp.example",
-            IDP_ISSUER="https://idp.example",
+            CURL_CA_BUNDLE=str(root / "tls.pem"),
+            IDP_BASE_URL="https://idp.example:" + env["IDP_PORT"],
+            IDP_ISSUER="https://idp.example:" + env["IDP_PORT"],
             HOST_REDIRECTS="",
         )
         with (root / "public-health.log").open("w") as log:
             process = subprocess.Popen(
-                command, env=public, stdout=log, stderr=subprocess.STDOUT
+                command + ["tls", "--cert", str(root / "tls.pem"), "--cert-key", str(root / "tls.key")],
+                env=public, stdout=log, stderr=subprocess.STDOUT
             )
             try:
                 deadline = time.monotonic() + 10
@@ -341,7 +348,8 @@ def main():
                         time.sleep(0.05)
                 assert result is not None and result.returncode == 0
                 assert json.loads(result.stdout)["service"] == "snodec-idp"
-                assert requests.get(origin + "/health", timeout=5).status_code == 404
+                assert requests.get(origin.replace("http:", "https:") + "/health",
+                                    verify=str(root / "tls.pem"), timeout=5).status_code == 404
             finally:
                 process.terminate()
                 try:

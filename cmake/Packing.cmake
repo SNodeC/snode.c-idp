@@ -35,8 +35,8 @@ set(CPACK_DEBIAN_AUTH-CLIENT_PACKAGE_DEPENDS
 set(CPACK_RPM_AUTH-CLIENT_PACKAGE_REQUIRES
     "snodec-http-server-express-legacy-in, snodec-http-client, snodec-net-in-stream-tls, openssl-devel, json-devel"
 )
-set(CPACK_DEBIAN_AUTH_IDP_PACKAGE_DEPENDS "python3, openssl, systemd, nginx")
-set(CPACK_RPM_AUTH_IDP_PACKAGE_REQUIRES "python3, openssl, systemd, nginx")
+set(CPACK_DEBIAN_AUTH_IDP_PACKAGE_DEPENDS "python3, openssl, systemd")
+set(CPACK_RPM_AUTH_IDP_PACKAGE_REQUIRES "python3, openssl, systemd")
 if(NOT AUTH_CLIENT_ONLY)
     configure_file(packaging/snodec-idp.service.in snodec-idp.service @ONLY)
     install(
