@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.18)
 
+include(cmake/Version.cmake)
+
 project(
     snodec-auth-idp
     DESCRIPTION
         "SNode.C Identity Provider: OAuth2 + PKCE + TOTP MFA + JWT RS256"
-    VERSION 2.0.0
+    VERSION ${RELEASE_VERSION}
     LANGUAGES CXX
 )
 
