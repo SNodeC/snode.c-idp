@@ -1,6 +1,6 @@
 #pragma once
 
-#include "JwtVerifier.h"
+#include "OAuthClient.h"
 #include "UserContext.h"
 #include "express/Next.h"
 #include "express/Request.h"
@@ -15,7 +15,7 @@ namespace snodec {
 
         class AuthMiddleware {
         public:
-            explicit AuthMiddleware(JwtVerifier& jwtVerifier);
+            explicit AuthMiddleware(std::shared_ptr<OAuthClient> client);
 
             std::function<void(const std::shared_ptr<express::Request>&, const std::shared_ptr<express::Response>&, express::Next&)>
             handler();
@@ -23,7 +23,7 @@ namespace snodec {
             static const UserContext* getUser(const std::shared_ptr<express::Request>& req);
 
         private:
-            JwtVerifier& jwtVerifier_;
+            std::shared_ptr<OAuthClient> client_;
         };
 
     } // namespace auth

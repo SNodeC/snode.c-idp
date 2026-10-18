@@ -3,9 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Builds standalone against vanilla upstream SNode.C (cloned + installed in
-      # the Dockerfile). Override SNODEC_REPO/SNODEC_REF build args to pin a
-      # specific upstream commit instead of master.
+      args:
+        AUTH_REVISION: ${AUTH_REVISION:-unknown}
+      # Framework source defaults to the immutable revision in Dockerfile.
     image: auth-idp:latest
     container_name: auth-idp
     restart: unless-stopped
@@ -16,21 +16,17 @@ services:
       - IDP_PORT=8080
       - IDP_BASE_URL=${IDP_BASE_URL:-https://auth.janeberwein.at}
       - IDP_ISSUER=${IDP_ISSUER:-https://auth.janeberwein.at}
+      - HOST_REDIRECTS=${HOST_REDIRECTS:-}
       # ── Paths ───────────────────────────────────────────────────────
       - IDP_PRIVATE_KEY_PATH=/app/keys/private_key.pem
       - IDP_PUBLIC_KEY_PATH=/app/keys/public_key.pem
       - DB_PATH=/app/data/auth.db
       # ── Security ────────────────────────────────────────────────────
-      - TOTP_KEY_PATH=${TOTP_KEY_PATH:-}
-      - IDP_ALLOWED_REDIRECT_URIS=${IDP_ALLOWED_REDIRECT_URIS:-}
-      - SETUP_CLAIM_TOKEN=${SETUP_CLAIM_TOKEN:-}
+      - TOTP_KEY_PATH=/app/keys/totp.key
+      - IDP_CLIENTS=${IDP_CLIENTS:?Configure IDP_CLIENTS}
       # ── Federated Login (optional) ───────────────────────────────────
       - OAUTH_GOOGLE_CLIENT_ID=${OAUTH_GOOGLE_CLIENT_ID:-}
       - OAUTH_GOOGLE_CLIENT_SECRET=${OAUTH_GOOGLE_CLIENT_SECRET:-}
-      - OAUTH_APPLE_CLIENT_ID=${OAUTH_APPLE_CLIENT_ID:-}
-      - OAUTH_APPLE_CLIENT_SECRET=${OAUTH_APPLE_CLIENT_SECRET:-}
-      - OAUTH_META_CLIENT_ID=${OAUTH_META_CLIENT_ID:-}
-      - OAUTH_META_CLIENT_SECRET=${OAUTH_META_CLIENT_SECRET:-}
       # ── SMTP ────────────────────────────────────────────────────────
       - SMTP_COMMAND=${SMTP_COMMAND:-}
     volumes:
@@ -38,7 +34,7 @@ services:
       - auth_keys:/app/keys
       - auth_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test: ["CMD", "/bin/sh", "/app/healthcheck.sh"]
       interval: 30s
       timeout: 5s
       retries: 3

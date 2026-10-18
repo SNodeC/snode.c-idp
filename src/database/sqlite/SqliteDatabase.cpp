@@ -135,23 +135,6 @@ namespace snodec::database::sqlite {
                 updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- OAuth2 authorisation codes (short-lived, single-use)
-            CREATE TABLE IF NOT EXISTS auth_code (
-                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                code                 TEXT    NOT NULL UNIQUE,
-                user_id              INTEGER NOT NULL,
-                client_id            TEXT    NOT NULL,
-                redirect_uri         TEXT    NOT NULL,
-                scope                TEXT    NOT NULL,
-                state                TEXT    NOT NULL,
-                code_challenge       TEXT    DEFAULT NULL,
-                code_challenge_method TEXT   DEFAULT NULL,
-                created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
-                expires_at           DATETIME NOT NULL,
-                mfa_verified         INTEGER DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE
-            );
-
             -- Password reset tokens
             CREATE TABLE IF NOT EXISTS password_reset_tokens (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,22 +144,6 @@ namespace snodec::database::sqlite {
                 created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE
             );
-
-            -- Active login sessions
-            CREATE TABLE IF NOT EXISTS session (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                token       TEXT    NOT NULL UNIQUE,
-                user_id     INTEGER NOT NULL,
-                expires_at  DATETIME NOT NULL,
-                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE
-            );
-
-
-
-            -- Index for fast auth_code lookup
-            CREATE INDEX IF NOT EXISTS idx_auth_code_code
-                ON auth_code (code);
 
             -- Index for fast reset-token lookup
             CREATE INDEX IF NOT EXISTS idx_reset_token
@@ -189,6 +156,56 @@ namespace snodec::database::sqlite {
             std::string msg = errmsg ? errmsg : "unknown error";
             sqlite3_free(errmsg);
             throw std::runtime_error("SqliteDatabase::initSchema failed: " + msg);
+        }
+        int version = 0;
+        query("PRAGMA user_version", [&](const Row& row) {
+            version = std::stoi(row.get(0));
+        });
+        if (version < 2) {
+            if (!exec("BEGIN IMMEDIATE")) {
+                throw std::runtime_error("Cannot start authentication migration");
+            }
+            try {
+                auto sql = [this](const std::string& statement) {
+                    if (!exec(statement)) {
+                        throw std::runtime_error("Authentication migration failed");
+                    }
+                };
+                auto column = [this, &sql](const std::string& table, const std::string& name, const std::string& definition) {
+                    bool exists = false;
+                    query("PRAGMA table_info(" + table + ")", [&](const Row& row) {
+                        exists = exists || row.get(1) == name;
+                    });
+                    if (!exists) {
+                        sql("ALTER TABLE " + table + " ADD COLUMN " + name + " " + definition);
+                    }
+                };
+                column("user", "activated", "INTEGER NOT NULL DEFAULT 1");
+                column("password_reset_tokens", "used", "INTEGER NOT NULL DEFAULT 0");
+                sql("DROP TABLE IF EXISTS refresh_token");
+                sql("DROP TABLE IF EXISTS auth_code");
+                sql("DROP TABLE IF EXISTS session");
+                sql("CREATE TABLE session(id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT UNIQUE NOT NULL, user_id INTEGER NOT NULL "
+                    "REFERENCES user(id) ON DELETE CASCADE, mfa_verified INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL)");
+                sql("CREATE TABLE auth_flow(token_hash TEXT PRIMARY KEY, context TEXT NOT NULL, expires_at INTEGER NOT NULL)");
+                sql("CREATE TABLE auth_code(code TEXT PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE, "
+                    "context TEXT NOT NULL, expires_at INTEGER NOT NULL)");
+                sql("CREATE TABLE refresh_token(token_hash TEXT PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE "
+                    "CASCADE, context TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL)");
+                sql("CREATE TABLE federated_identity(provider TEXT NOT NULL, subject TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES "
+                    "user(id) ON DELETE CASCADE, PRIMARY KEY(provider,subject))");
+                sql("CREATE TRIGGER revoke_account_credentials AFTER UPDATE OF password_hash,totp_enabled,totp_secret ON user BEGIN DELETE "
+                    "FROM session WHERE user_id=NEW.id; DELETE FROM auth_flow WHERE json_extract(context,'$.user_id')=CAST(NEW.id AS "
+                    "TEXT); DELETE FROM password_reset_tokens WHERE user_id=NEW.id; END");
+                sql("CREATE TRIGGER revoke_deleted_flows AFTER DELETE ON user BEGIN DELETE FROM auth_flow WHERE "
+                    "json_extract(context,'$.user_id')=CAST(OLD.id AS TEXT); END");
+                sql("DELETE FROM password_reset_tokens");
+                sql("PRAGMA user_version=2");
+                sql("COMMIT");
+            } catch (...) {
+                exec("ROLLBACK");
+                throw;
+            }
         }
     }
 
@@ -256,29 +273,21 @@ namespace snodec::database::sqlite {
     // ========================================================================
 
     bool SqliteDatabase::query(const std::string& sql,
-                                const std::vector<std::string>& params,
-                                const RowCallback& callback,
-                                std::string* errmsg) {
-        sqlite3_stmt* stmt = prepare(sql, params, errmsg);
-        if (stmt == nullptr) {
-            return false;
-        }
-
-        int rc = SQLITE_ROW;
-        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-            Row row(stmt);
-            callback(row);
-        }
-
-        sqlite3_finalize(stmt);
-
-        if (rc != SQLITE_DONE) {
-            if (errmsg) {
+                               const std::vector<std::string>& params,
+                               const RowCallback& callback,
+                               std::string* errmsg) {
+        std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> stmt(prepare(sql, params, errmsg), sqlite3_finalize);
+        int rc = SQLITE_ERROR;
+        if (stmt) {
+            while ((rc = sqlite3_step(stmt.get())) == SQLITE_ROW) {
+                Row row(stmt.get());
+                callback(row);
+            }
+            if (rc != SQLITE_DONE && errmsg) {
                 *errmsg = sqlite3_errmsg(db_);
             }
-            return false;
         }
-        return true;
+        return rc == SQLITE_DONE;
     }
 
     bool SqliteDatabase::query(const std::string& sql,

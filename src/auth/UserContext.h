@@ -12,6 +12,7 @@ namespace snodec {
             std::string username;
             std::vector<std::string> scopes;
             std::string email;
+            bool mfaVerified = false;
 
             bool hasScope(const std::string& scope) const;
         };

@@ -12,17 +12,26 @@ PUBLIC_KEY="${IDP_PUBLIC_KEY_PATH:-$KEYS_DIR/public_key.pem}"
 
 echo "[entrypoint] SNode.C Identity Provider starting..."
 
-# ── Generate RSA keys if missing ──────────────────────────────────────────────
-if [ ! -f "$PRIVATE_KEY" ] || [ ! -f "$PUBLIC_KEY" ]; then
-    echo "[entrypoint] No RSA keys found — generating RSA-2048 key pair..."
+# Never replace an existing private key merely because its public export is missing.
+umask 077
+if [ ! -f "$PRIVATE_KEY" ]; then
+    if [ -e "$DB_PATH" ]; then
+        echo "[entrypoint] Existing database requires its original signing key" >&2
+        exit 1
+    fi
     mkdir -p "$KEYS_DIR"
     openssl genrsa -out "$PRIVATE_KEY" 2048 2>/dev/null
-    openssl rsa -in "$PRIVATE_KEY" -pubout -out "$PUBLIC_KEY" 2>/dev/null
-    chmod 600 "$PRIVATE_KEY"
-    echo "[entrypoint] Keys generated: $PRIVATE_KEY, $PUBLIC_KEY"
-else
-    echo "[entrypoint] RSA keys found at $KEYS_DIR"
 fi
+openssl rsa -in "$PRIVATE_KEY" -pubout -out "$PUBLIC_KEY" 2>/dev/null
+TOTP_KEY_PATH="${TOTP_KEY_PATH:-$KEYS_DIR/totp.key}"
+if [ ! -f "$TOTP_KEY_PATH" ]; then
+    if [ -e "$DB_PATH" ]; then
+        echo "[entrypoint] Existing database requires its TOTP encryption key; provision it explicitly" >&2
+        exit 1
+    fi
+    openssl rand -out "$TOTP_KEY_PATH" 32
+fi
+export TOTP_KEY_PATH
 
 # ── Ensure data directory exists ──────────────────────────────────────────────
 mkdir -p "$DATA_DIR"

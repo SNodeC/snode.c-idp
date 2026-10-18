@@ -31,9 +31,6 @@ namespace snodec {
             static std::string base32Encode(const std::vector<uint8_t>& data);
             static std::vector<uint8_t> base32Decode(const std::string& encoded);
 
-            // HMAC-SHA1
-            static std::vector<uint8_t> hmacSha1(const std::vector<uint8_t>& key, const std::vector<uint8_t>& message);
-
             // TOTP algorithm
             static uint32_t generateTotpValue(const std::vector<uint8_t>& secret, uint64_t timeCounter);
         };

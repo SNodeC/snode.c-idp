@@ -1,120 +1,86 @@
 #include "JwtSigner.h"
 
-#include "utils/base64.h"
+#include "Security.h"
 
-#include <algorithm>
-#include <iostream>
-#include <openssl/err.h>
-#include <openssl/evp.h>
+#include <memory>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
-#include <sstream>
-#include <vector>
 
-namespace snodec {
-    namespace auth {
-
-        JwtSigner::JwtSigner(const std::string& issuer, const std::string& privateKeyPem)
-            : issuer_(issuer)
-            , privateKeyPem_(privateKeyPem) {
+namespace snodec::auth {
+    JwtSigner::JwtSigner(const std::string& issuer, const std::string& privateKeyPem)
+        : issuer_(issuer)
+        , privateKeyPem_(privateKeyPem) {
+        std::unique_ptr<BIO, decltype(&BIO_free)> input(BIO_new_mem_buf(privateKeyPem.data(), static_cast<int>(privateKeyPem.size())),
+                                                        BIO_free);
+        require(input != nullptr, "Invalid signing key");
+        std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(PEM_read_bio_PrivateKey(input.get(), nullptr, nullptr, nullptr),
+                                                                EVP_PKEY_free);
+        require(key && EVP_PKEY_is_a(key.get(), "RSA") == 1 && EVP_PKEY_get_bits(key.get()) >= 2048,
+                "RSA key must have at least 2048 bits");
+        Json jwk = {{"kty", "RSA"}};
+        for (const auto* name : {"e", "n"}) {
+            BIGNUM* raw = nullptr;
+            require(EVP_PKEY_get_bn_param(key.get(), name, &raw) == 1, "Invalid RSA key");
+            std::unique_ptr<BIGNUM, decltype(&BN_free)> value(raw, BN_free);
+            std::string bytes(static_cast<size_t>(BN_num_bytes(value.get())), '\0');
+            BN_bn2bin(value.get(), reinterpret_cast<unsigned char*>(bytes.data()));
+            jwk[name] = base64Url(bytes);
         }
+        keyId_ = sha256(jwk.dump());
+        jwk.update({{"kid", keyId_}, {"use", "sig"}, {"alg", "RS256"}});
+        jwks_ = Json({{"keys", Json::array({jwk})}}).dump();
+        std::unique_ptr<BIO, decltype(&BIO_free)> output(BIO_new(BIO_s_mem()), BIO_free);
+        require(output && PEM_write_bio_PUBKEY(output.get(), key.get()) == 1, "Cannot export public key");
+        char* data = nullptr;
+        const long length = BIO_get_mem_data(output.get(), &data);
+        publicKey_.assign(data, static_cast<size_t>(length));
+    }
 
-        std::string JwtSigner::base64UrlEncode(const std::string& input) {
-            std::string base64 = base64::base64_encode(reinterpret_cast<const unsigned char*>(input.data()), input.length());
-            std::replace(base64.begin(), base64.end(), '+', '-');
-            std::replace(base64.begin(), base64.end(), '/', '_');
-            base64.erase(std::remove(base64.begin(), base64.end(), '='), base64.end());
-            return base64;
+    std::string JwtSigner::jwks() const {
+        return jwks_;
+    }
+
+    std::string JwtSigner::publicKey() const {
+        return publicKey_;
+    }
+
+    std::string JwtSigner::sign(const JwtClaims& claims) {
+        require(!claims.sessionId.empty() && (claims.purpose == "access" || claims.purpose == "id"), "Invalid token identity");
+        const Json header = {{"alg", "RS256"}, {"typ", claims.purpose == "access" ? "at+jwt" : "JWT"}, {"kid", keyId_}};
+        Json payload = {{"iss", issuer_},
+                        {"aud", claims.audience},
+                        {"sub", claims.subject},
+                        {"sid", claims.sessionId},
+                        {"exp", std::chrono::duration_cast<std::chrono::seconds>(claims.expiresAt.time_since_epoch()).count()},
+                        {"iat", epochSeconds()},
+                        {"nbf", epochSeconds()},
+                        {"username", claims.username},
+                        {"email", claims.email},
+                        {"mfa_verified", claims.mfaVerified},
+                        {"scope", claims.scopes},
+                        {"token_use", claims.purpose}};
+        if (claims.purpose == "id" && !claims.nonce.empty()) {
+            payload["nonce"] = claims.nonce;
         }
-
-        std::string JwtSigner::sign(const JwtClaims& claims) {
-            // 1. Header with kid (Key ID) for key rotation support
-            std::string headerJson = R"({"alg":"RS256","typ":"JWT","kid":"snodec-key-2024"})";
-            std::string headerB64 = base64UrlEncode(headerJson);
-
-            // 2. Payload (RFC 7519 registered claims)
-            std::stringstream ss;
-            ss << "{";
-            ss << "\"iss\":\"" << issuer_ << "\",";
-            ss << "\"sub\":\"" << claims.subject << "\",";
-            ss << "\"aud\":\"" << claims.audience << "\",";
-
-            auto exp = std::chrono::system_clock::to_time_t(claims.expiresAt);
-            auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-            ss << "\"exp\":" << exp << ",";
-            ss << "\"iat\":" << now << ",";  // Issued At (RFC 7519 §4.1.6)
-            ss << "\"nbf\":" << now << ",";  // Not Before (RFC 7519 §4.1.5)
-
-            ss << "\"username\":\"" << claims.username << "\",";
-            if (!claims.email.empty()) {
-                ss << "\"email\":\"" << claims.email << "\",";
-            }
-            ss << "\"mfa_verified\":" << (claims.mfaVerified ? "true" : "false") << ",";
-
-            ss << "\"scope\":[";
-            for (size_t i = 0; i < claims.scopes.size(); ++i) {
-                ss << "\"" << claims.scopes[i] << "\"";
-                if (i < claims.scopes.size() - 1)
-                    ss << ",";
-            }
-            ss << "]";
-
-            ss << "}";
-            std::string payloadJson = ss.str();
-            std::string payloadB64 = base64UrlEncode(payloadJson);
-
-            // 3. Sign
-            std::string dataToSign = headerB64 + "." + payloadB64;
-
-            BIO* bio = BIO_new_mem_buf(privateKeyPem_.data(), static_cast<int>(privateKeyPem_.length()));
-            EVP_PKEY* privKey = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
-            BIO_free(bio);
-
-            if (!privKey) {
-                std::cerr << "Failed to load private key" << std::endl;
-                return "";
-            }
-
-            EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-            if (!ctx) {
-                EVP_PKEY_free(privKey);
-                return "";
-            }
-
-            if (EVP_DigestSignInit(ctx, nullptr, EVP_sha256(), nullptr, privKey) <= 0) {
-                EVP_MD_CTX_free(ctx);
-                EVP_PKEY_free(privKey);
-                return "";
-            }
-
-            if (EVP_DigestSignUpdate(ctx, dataToSign.data(), dataToSign.length()) <= 0) {
-                EVP_MD_CTX_free(ctx);
-                EVP_PKEY_free(privKey);
-                return "";
-            }
-
-            size_t sigLen = 0;
-            if (EVP_DigestSignFinal(ctx, nullptr, &sigLen) <= 0) {
-                EVP_MD_CTX_free(ctx);
-                EVP_PKEY_free(privKey);
-                return "";
-            }
-
-            std::vector<unsigned char> signature(sigLen);
-            if (EVP_DigestSignFinal(ctx, signature.data(), &sigLen) <= 0) {
-                EVP_MD_CTX_free(ctx);
-                EVP_PKEY_free(privKey);
-                return "";
-            }
-
-            EVP_MD_CTX_free(ctx);
-            EVP_PKEY_free(privKey);
-
-            std::string signatureStr(reinterpret_cast<char*>(signature.data()), sigLen);
-            std::string signatureB64 = base64UrlEncode(signatureStr);
-
-            return headerB64 + "." + payloadB64 + "." + signatureB64;
-        }
-
-    } // namespace auth
-} // namespace snodec
+        const std::string input = base64Url(header.dump()) + "." + base64Url(payload.dump());
+        std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new_mem_buf(privateKeyPem_.data(), static_cast<int>(privateKeyPem_.size())),
+                                                      BIO_free);
+        require(bio != nullptr, "Cannot load signing key");
+        std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(PEM_read_bio_PrivateKey(bio.get(), nullptr, nullptr, nullptr),
+                                                                EVP_PKEY_free);
+        std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+        require(key && ctx && EVP_DigestSignInit(ctx.get(), nullptr, EVP_sha256(), nullptr, key.get()) == 1, "Cannot initialize signature");
+        size_t length = 0;
+        require(EVP_DigestSign(ctx.get(), nullptr, &length, reinterpret_cast<const unsigned char*>(input.data()), input.size()) == 1,
+                "Cannot size signature");
+        std::string signature(length, '\0');
+        require(EVP_DigestSign(ctx.get(),
+                               reinterpret_cast<unsigned char*>(signature.data()),
+                               &length,
+                               reinterpret_cast<const unsigned char*>(input.data()),
+                               input.size()) == 1,
+                "Cannot sign token");
+        signature.resize(length);
+        return input + "." + base64Url(signature);
+    }
+} // namespace snodec::auth

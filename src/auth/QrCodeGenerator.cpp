@@ -103,10 +103,10 @@ namespace snodec {
 
             auto writeChunk = [&](const char type[4], const std::vector<uint8_t>& data) {
                 uint32_t len = (uint32_t) data.size();
-                png.push_back((len >> 24) & 0xFF);
-                png.push_back((len >> 16) & 0xFF);
-                png.push_back((len >> 8) & 0xFF);
-                png.push_back(len & 0xFF);
+                png.push_back(static_cast<uint8_t>(len >> 24));
+                png.push_back(static_cast<uint8_t>(len >> 16));
+                png.push_back(static_cast<uint8_t>(len >> 8));
+                png.push_back(static_cast<uint8_t>(len));
 
                 png.push_back(type[0]);
                 png.push_back(type[1]);
@@ -122,20 +122,20 @@ namespace snodec {
                 crcData.insert(crcData.end(), data.begin(), data.end());
 
                 uint32_t crc = crc32(crcData);
-                png.push_back((crc >> 24) & 0xFF);
-                png.push_back((crc >> 16) & 0xFF);
-                png.push_back((crc >> 8) & 0xFF);
-                png.push_back(crc & 0xFF);
+                png.push_back(static_cast<uint8_t>(crc >> 24));
+                png.push_back(static_cast<uint8_t>(crc >> 16));
+                png.push_back(static_cast<uint8_t>(crc >> 8));
+                png.push_back(static_cast<uint8_t>(crc));
             };
 
             // IHDR
             std::vector<uint8_t> ihdr;
             ihdr.reserve(13);
             auto put32 = [&](uint32_t v) {
-                ihdr.push_back((v >> 24) & 0xFF);
-                ihdr.push_back((v >> 16) & 0xFF);
-                ihdr.push_back((v >> 8) & 0xFF);
-                ihdr.push_back(v & 0xFF);
+                ihdr.push_back(static_cast<uint8_t>(v >> 24));
+                ihdr.push_back(static_cast<uint8_t>(v >> 16));
+                ihdr.push_back(static_cast<uint8_t>(v >> 8));
+                ihdr.push_back(static_cast<uint8_t>(v));
             };
             put32((uint32_t) imgSize); // width
             put32((uint32_t) imgSize); // height
@@ -173,11 +173,11 @@ namespace snodec {
                 out.push_back(last ? 0x01 : 0x00);
 
                 // LEN, NLEN
-                out.push_back(blockLen & 0xFF);
-                out.push_back((blockLen >> 8) & 0xFF);
+                out.push_back(static_cast<uint8_t>(blockLen));
+                out.push_back(static_cast<uint8_t>(blockLen >> 8));
                 uint16_t nlen = (uint16_t) ~blockLen;
-                out.push_back(nlen & 0xFF);
-                out.push_back((nlen >> 8) & 0xFF);
+                out.push_back(static_cast<uint8_t>(nlen));
+                out.push_back(static_cast<uint8_t>(nlen >> 8));
 
                 // payload
                 out.insert(out.end(), data.begin() + pos, data.begin() + pos + blockLen);
@@ -191,10 +191,10 @@ namespace snodec {
                 s2 = (s2 + s1) % 65521;
             }
             uint32_t adler = (s2 << 16) | s1;
-            out.push_back((adler >> 24) & 0xFF);
-            out.push_back((adler >> 16) & 0xFF);
-            out.push_back((adler >> 8) & 0xFF);
-            out.push_back(adler & 0xFF);
+            out.push_back(static_cast<uint8_t>(adler >> 24));
+            out.push_back(static_cast<uint8_t>(adler >> 16));
+            out.push_back(static_cast<uint8_t>(adler >> 8));
+            out.push_back(static_cast<uint8_t>(adler));
 
             return out;
         }
