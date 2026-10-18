@@ -6,7 +6,7 @@
 
 # Local IDP and browser application: complete walkthrough
 
-For a public server installed from binary packages, follow the [ten-step package deployment guide](package-deployment.md#1-check-package-availability) and its [commented script](../scripts/deploy-core-snodec-org.sh). This page retains the separate source-based localhost development workflow.
+For a public server installed from binary packages, follow the [ten-step package deployment guide](package-deployment.md#banner) and its [interactive script](../scripts/deploy-core-snodec-org.sh). This page retains the separate source-based localhost development workflow.
 
 This walkthrough deploys Jan Nicolas Eberwein’s SNode.C IDP from this fork and a
 minimal SNode.C application on one Linux machine. It covers the implemented
