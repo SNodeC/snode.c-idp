@@ -3,7 +3,11 @@ project(minimal-mfa-app LANGUAGES CXX)
 if(NOT TARGET auth-client)
     find_package(snodec-auth 2 REQUIRED)
 endif()
+find_package(snodec REQUIRED COMPONENTS http-server-express-tls-in)
 add_executable(minimal-mfa-app main.cpp)
+target_link_libraries(
+    minimal-mfa-app PRIVATE snodec::http-server-express-tls-in
+)
 target_compile_features(minimal-mfa-app PRIVATE cxx_std_20)
 if(TARGET auth-client)
     target_link_libraries(minimal-mfa-app PRIVATE auth-client)

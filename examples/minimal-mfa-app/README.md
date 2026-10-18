@@ -43,8 +43,10 @@ Open `http://localhost:8084/` and choose **Sign in with MFA**. The local IDP mus
 | `APP_CLIENT_ID` | `minimal-mfa-app` | Registered client ID |
 | `APP_CALLBACK_URL` | `http://localhost:8084/auth/callback` | Exact registered callback; example path is fixed at `/auth/callback` |
 | `IDP_PUBLIC_KEY_PATH` | `idp-public.pem` | IDP public verification key |
-| `APP_PORT` | `8084` | Internal listener port |
+| `APP_PORT` | Port from `APP_CALLBACK_URL` (`8084` locally) | Direct listener port; HTTPS must match the callback origin |
 
 `/account` and `/sign-out` redirect to the configured IDP settings and logout pages. Logout is confirmed on the IDP; revocation is checked on subsequent protected requests. The example never receives your IDP password, Google client secret or signing private key.
 
-The optional `snodec-idp-example` package installs the executable, static assets and a dormant service unit. Follow the [existing package deployment instructions](../../docs/package-deployment.md#banner): download and run the single shell script, then choose to deploy the styled example. The script installs the packages and configures its separate HTTPS hostname and service; Certbot is installed explicitly only when choosing Let’s Encrypt. Installing it does not start a listener.
+The optional `snodec-idp-example` package installs the executable, static assets and a dormant service unit. Follow the [existing package deployment instructions](../../docs/package-deployment.md#banner): download and run the single shell script, then choose to deploy the styled example. The script installs the packages and configures its separate HTTPS hostname, public port (e.g. 443) and direct SNode.C TLS service; Certbot is installed explicitly only when choosing Let’s Encrypt. Installing it does not start a listener.
+
+For native HTTPS, set `APP_CALLBACK_URL=https://core.vchrist.at/auth/callback` and `IDP_BASE_URL=https://core.snodec.org:8088`, register that exact callback at the IDP, and pass `MinimalMfaApp local --host 0.0.0.0 tls --cert /path/fullchain.pem --cert-key /path/privkey.pem`. HTTPS callbacks select a TLS listener automatically. The packaged service uses systemd credentials and grants only the capability needed to bind privileged ports. Local HTTP development remains unchanged.

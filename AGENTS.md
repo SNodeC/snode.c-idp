@@ -6,7 +6,8 @@ Consume installed SNode.C through `find_package(snodec REQUIRED COMPONENTS
 http-server-express-legacy-in http-client net-in-stream-tls)`. The server component loads the transport, Express,
 core, utilities, and logger targets transitively. `logger` is not a standalone
 public discovery component. The exported `snodec-auth` package must follow the
-same discovery contract.
+same discovery contract. Standalone IDP/example executables privately discover
+and link `http-server-express-tls-in` for direct HTTPS.
 
 Use the public `Log.h` API and `snode::log::application()` for application
 diagnostics. Do not reintroduce Easylogging++ macros or compatibility wrappers.
@@ -79,7 +80,7 @@ loopback fixtures to verify configuration isolation and mounted lifetime.
 
 When the user authorizes runtime tests, build the installed-package consumers in
 `tests/live/` and invoke `tests/live.py` (HTTP and `--https`) plus
-`tests/live_tls.py` explicitly as documented in the guide. These are never normal
+`tests/live_tls.py` and `tests/live_direct_tls.py` explicitly as documented in the guide. These are never normal
 build/CTest side effects. Use fresh disposable work directories under the task's
 temporary build root and loopback listeners. Keep real provider/mail credentials
 out of fixtures. Report unavailable Google/SMTP/Docker checks separately from
@@ -92,3 +93,5 @@ CPack maps the existing install components to server, client-dev, server-dev and
 The shell bootstrap delegates interactive configuration and provisioning to this same helper. Keep deployment.json as the sole operator input: saved values become editable defaults, secrets stay hidden, and absent JSON supplies no deployment defaults. Certificate tooling follows the chosen TLS owner. Deployment tests must use disposable files and mocked system changes; never contact ACME, Google or real SMTP as a test side effect.
 
 The bootstrap downloads deploy.py by its pinned Git blob ID. Whenever that helper changes, update helper_blob in the shell script with `git hash-object scripts/deploy.py`; deployment tests verify the pin. Users download and execute only the shell script.
+
+Public deployment uses direct TLS listeners selected by configured HTTPS origins. Keep listener ports, Google/application callbacks and HTTP redirect targets derived from the sole deployment JSON. Packaged units use IPv4 and systemd TLS credentials; Certbot standalone briefly stops/starts the IDP for port 80. Do not reintroduce a proxy dependency or proxy configuration generation.

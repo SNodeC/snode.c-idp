@@ -71,7 +71,7 @@ if $COMPOSE build 2>&1 | tee -a "$LOG_FILE"; then
     $COMPOSE up -d --force-recreate 2>&1 | tee -a "$LOG_FILE"
     log "Service restarted. Checking health..."
     sleep 15
-    if curl -fsS http://localhost:8080/health > /dev/null 2>&1; then
+    if $COMPOSE exec -T "$SERVICE" /bin/sh /app/healthcheck.sh > /dev/null 2>&1; then
         log "✓ Health check passed. Update complete: ${REMOTE:0:8}"
     else
         log "✗ Health check FAILED after update! Check: docker compose logs $SERVICE"

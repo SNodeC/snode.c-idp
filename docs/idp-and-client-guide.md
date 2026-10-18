@@ -143,7 +143,9 @@ formatting, vendor exclusions, and temporary/persistent build locations.
 | `IDP_BASE_URL` | Public origin, including scheme and optional port, with no trailing slash or path; default `http://localhost:8083` |
 | `IDP_ISSUER` | Must equal `IDP_BASE_URL`; defaults to it |
 | `HOST_REDIRECTS` | Optional JSON object mapping additional exact hostnames to fixed client URLs; absent, empty or `{}` enables no redirects |
-| `IDP_PORT` | Local listener port; default 8083, range 0–65535; 0 asks the OS to choose |
+| `IDP_PORT` | Defaults to the port in `IDP_BASE_URL`; HTTPS must match that origin. Local HTTP permits 0–65535 (0 requests an ephemeral port) |
+| `HTTP_REDIRECTS` | Optional hostname-to-HTTPS-origin JSON for the separate HTTP redirect listener; absent or `{}` disables it |
+| `HTTP_PORT` | Redirect listener port, default 80 when enabled; must differ from the IDP port |
 | `IDP_CLIENTS` | JSON object mapping client IDs to arrays of exact callback URLs; default `{}` permits no OAuth clients |
 | `DB_PATH` | SQLite file; default `snodec_auth.db` |
 | `IDP_PRIVATE_KEY_PATH` | Existing RSA private PEM; provision an RSA key of at least 2048 bits |
@@ -185,8 +187,9 @@ openssl rand -out /absolute/path/to/keys/totp.key 32
 
 Start the installed `auth_idp` binary only after configuration and backups are
 ready. Use HTTPS at the public boundary. The public origin determines Secure
-cookie attributes and the browser Origin checks; a proxy must preserve the
-browser's Origin. Keep the backend inaccessible to untrusted direct callers.
+cookie attributes, browser Origin checks and listener transport. HTTPS selects
+SNode.C TLS directly; pass `IdpServer tls --cert /path/fullchain.pem --cert-key /path/privkey.pem`.
+The [package deployment guide](package-deployment.md#banner) configures this automatically.
 The application callback URL is configured explicitly, never reconstructed from
 untrusted Host or forwarding headers.
 
@@ -195,15 +198,15 @@ untrusted Host or forwarding headers.
 The existing `auth_idp` executable mounts the complete `IdpMiddleware` inside
 SNode.C/Express's `VHost` middleware. The IDP hostname comes from the configured
 issuer/base URL; there is no second IDP hostname setting that can disagree with
-it. For example, `https://core.snodec.org` serves IDP routes only for
+it. For example, `https://core.snodec.org:8088` serves IDP routes only for
 `core.snodec.org`.
 
 Additional hostnames can redirect to fixed client URLs. Configure them in the
 same environment file as the IDP:
 
 ```bash
-export IDP_BASE_URL=https://core.snodec.org
-export IDP_ISSUER=https://core.snodec.org
+export IDP_BASE_URL=https://core.snodec.org:8088
+export IDP_ISSUER=https://core.snodec.org:8088
 export HOST_REDIRECTS='{
   "core.vchrist.at": "https://client.example.org/",
   "another.example.org": "https://another-client.example.org/landing?from=idp"
@@ -255,27 +258,18 @@ local settings, the IDP is still `http://localhost:8083` and the already-deploye
 application is still `http://localhost:8084`; the generic walkthrough uses 8081.
 An omitted/empty `HOST_REDIRECTS` preserves the existing single-IDP setup.
 
-The intentional access change is hostname isolation: requests using an unrelated
-alias or backend IP as `Host` no longer reach the IDP. Reverse proxies must
-preserve the original public `Host` header, including for back-channel token and
-introspection requests. Do not rewrite every hostname to the IDP hostname; that
-would defeat hostname isolation before requests reach the application.
+Requests using an unrelated alias or IP as `Host` do not reach the IDP. DNS must point each configured hostname to this server. HTTPS now uses a direct TLS listener, and its port must match the public origin. For native startup provide the certificate/key through SNode.C's `IdpServer tls` options; the package helper supplies them through systemd credentials.
 
-Dockerfile and Compose health checks share `scripts/healthcheck.sh`. It connects
-to the private loopback listener but sends the configured public IDP authority in
-`Host`. For a manual probe of a server whose public origin is
-`https://core.snodec.org` and whose private listener is port 8083:
+Dockerfile and Compose health checks share `scripts/healthcheck.sh`. It connects to loopback while retaining the configured public origin for Host, SNI and certificate verification. For manual direct HTTPS checks:
 
 ```bash
-curl --fail -H 'Host: core.snodec.org' http://127.0.0.1:8083/health
-curl -i -H 'Host: core.vchrist.at' http://127.0.0.1:8083/any/path
+curl --fail https://core.snodec.org:8088/health
+curl -i https://core.vchrist.at:8088/any/path
 ```
 
-The second command requires that redirect hostname in `HOST_REDIRECTS`. It should
-return 303 with the configured client URL. Requests for these names must be routed
-to this service by DNS and the deployment's proxy. TLS certificates, certificate
-renewal and HTTP-to-HTTPS listener redirects remain deployment configuration;
-this change neither provisions certificates nor exposes a new TLS listener.
+The second command assumes `core.vchrist.at` is a redirect hostname in `HOST_REDIRECTS`, rather than the application's own hostname. It returns 303 with the configured fixed destination. The IDP TLS certificate must cover every redirect hostname too.
+
+`HTTP_REDIRECTS` controls a separate optional plaintext listener: exact hostname keys map to HTTPS origins, and incoming paths/queries are preserved with status 308. Unknown hosts receive 404. `HTTP_PORT` defaults to 80. This is distinct from fixed-destination `HOST_REDIRECTS` on the IDP listener. The package helper derives both maps from `deployment.json`; operators do not maintain duplicate generated configuration. Local HTTP development does not enable this additional listener by default.
 
 ## Complete minimal application
 
@@ -453,8 +447,15 @@ synchronously; the Google HTTP exchange no longer invokes shell commands.
 ## Docker and operational lifecycle
 
 Copy `.env.example` to `.env`, set real origins, register callbacks and configure
-Google/email only if needed. Compose exposes the container on host loopback
-`127.0.0.1:8080`; terminate HTTPS in a reverse proxy. The Dockerfile builds the
+Google/email only if needed. Compose exposes direct HTTPS on `IDP_PORT` (8088 by
+default); include that same port in `IDP_BASE_URL`. Set `TLS_CERTIFICATE` and
+`TLS_PRIVATE_KEY` to existing host PEM files, mounted read-only. Arrange restricted
+file ownership/group permissions so the container's `authidp` user can read them;
+never make the key world-readable. Renew certificates externally and recreate the
+container to refresh file mounts (`docker compose up -d --force-recreate`). Compose
+does not provision ACME, port-80 redirects or the example application; the
+[package deployment guide](package-deployment.md#banner) handles the full systemd setup.
+The Dockerfile builds the
 pinned SNode.C source in one stage, the auth package in another, and runs the
 binary as `authidp`. It includes the current CMake/formatting modules and disables
 test builds in the image. `Dockerfile.fork-legacy` is historical and unsupported.
@@ -585,7 +586,17 @@ python3 tests/live_tls.py \
   --work-dir /tmp/codex/build/snodec-idp/online/tls-run
 ```
 
-The HTTPS suite uses local reverse proxies, trusts only its generated certificate
+Test both actual application executables with direct TLS and HTTP redirects too:
+
+```bash
+python3 tests/live_direct_tls.py \
+  --idp /absolute/path/to/auth_idp \
+  --app /absolute/path/to/minimal-mfa-app \
+  --work-dir /tmp/codex/build/snodec-idp/online/direct-tls-run
+```
+
+The HTTPS suite uses direct IDP TLS and local proxies for its test client adapters,
+trusts only its generated certificate
 for requests and native clients, and permits that certificate's SPKI in Chromium.
 It does not disable native TLS verification. The separate transport suite checks
 both valid trust and rejection of an untrusted certificate or wrong hostname.

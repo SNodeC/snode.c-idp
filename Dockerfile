@@ -73,7 +73,7 @@ RUN chmod +x ./entrypoint.sh
 
 RUN mkdir -p /app/keys /app/data && chown -R authidp:authidp /app
 USER authidp
-EXPOSE 8080
+EXPOSE 8088
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["/bin/sh", "/app/healthcheck.sh"]
 ENTRYPOINT ["/app/entrypoint.sh"]

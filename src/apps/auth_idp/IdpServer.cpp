@@ -5,10 +5,12 @@
 #include "core/SNodeC.h"
 #include "express/legacy/in/WebApp.h"
 #include "express/middleware/VHost.h"
+#include "express/tls/in/WebApp.h"
 #include "web/http/CiStringMap.h"
 
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -33,11 +35,13 @@ int main(int argc, char* argv[]) {
     config.smtpCommand = env("SMTP_COMMAND", "");
     config.googleClientId = env("OAUTH_GOOGLE_CLIENT_ID", "");
     config.googleClientSecret = env("OAUTH_GOOGLE_CLIENT_SECRET", "");
-    const int port = std::stoi(env("IDP_PORT", "8083"));
+    const auto issuer = snodec::auth::endpoint(config.issuer);
+    const int port = std::stoi(env("IDP_PORT", std::to_string(issuer.port)));
     if (port < 0 || port > 65535) {
         throw std::out_of_range("IDP_PORT must be between 0 and 65535");
     }
-    const auto idpHost = snodec::auth::endpoint(config.issuer).host;
+    snodec::auth::require(!issuer.tls || port == issuer.port, "TLS listener port must match IDP_BASE_URL");
+    const auto idpHost = issuer.host;
     const std::regex hostname(R"(^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$)");
     snodec::auth::require(idpHost.size() <= 253 && std::regex_match(idpHost, hostname), "Invalid IDP hostname");
     std::set<std::string, web::http::ciLess> redirectHosts;
@@ -57,7 +61,7 @@ int main(int argc, char* argv[]) {
         snodec::auth::require(destination.is_string(), "Redirect destination must be a URL string");
         snodec::auth::endpoint(destination.get<std::string>());
     }
-    const express::legacy::in::WebApp app("IdpServer");
+    const express::Router app;
     const auto& idp = express::middleware::VHost(idpHost);
     idp.use(snodec::auth::IdpMiddleware(std::move(config)));
     app.use(idp);
@@ -72,13 +76,48 @@ int main(int argc, char* argv[]) {
             res->status(404).send("Not found");
         }
     });
-    app.listen(static_cast<uint16_t>(port), [port](const express::legacy::in::WebApp::SocketAddress& addr, const core::socket::State& st) {
-        if (st == core::socket::State::OK) {
-            snode::log::application().info() << "IdP Server listening on port " << port;
-        } else {
-            snode::log::application().error() << "IdP Server failed to start: " << addr.toString();
-        }
-    });
-
-    return core::SNodeC::start();
+    // One HTTP listener redirects known hosts to their configured public HTTPS origins.
+    const auto httpTargets = nlohmann::json::parse(env("HTTP_REDIRECTS", "{}"));
+    snodec::auth::require(httpTargets.is_object(), "HTTP_REDIRECTS must be an object");
+    for (const auto& [host, target] : httpTargets.items()) {
+        snodec::auth::require(std::regex_match(host, hostname), "Invalid HTTP redirect hostname");
+        const auto destination = snodec::auth::endpoint(target.get<std::string>());
+        snodec::auth::require(destination.tls && target == destination.origin, "HTTP redirect target must be an HTTPS origin");
+    }
+    std::optional<express::legacy::in::WebApp> http;
+    if (!httpTargets.empty()) {
+        http.emplace("IdpHttp");
+        const int httpPort = std::stoi(env("HTTP_PORT", "80"));
+        snodec::auth::require(httpPort > 0 && httpPort <= 65535 && httpPort != port, "Invalid HTTP redirect port");
+        http->use([httpTargets] APPLICATION(req, res) {
+            const auto host = req->get("Host").substr(0, req->get("Host").find(':'));
+            const auto target = httpTargets.find(host);
+            if (target == httpTargets.end()) {
+                res->status(404).send("Not found");
+            } else if (!snodec::auth::localPath(req->originalUrl)) {
+                res->status(400).send("Invalid request target");
+            } else {
+                res->redirect(308, target->get<std::string>() + req->originalUrl);
+            }
+        });
+        http->listen(static_cast<uint16_t>(httpPort), [](const auto&, const auto&) {
+        });
+    }
+    const auto serve = [port](const auto& server) {
+        server.listen(static_cast<uint16_t>(port), [port](const auto& addr, const core::socket::State& st) {
+            if (st == core::socket::State::OK) {
+                snode::log::application().info() << "IdP Server listening on port " << port;
+            } else {
+                snode::log::application().error() << "IdP Server failed to start: " << addr.toString();
+            }
+        });
+        return core::SNodeC::start();
+    };
+    int result;
+    if (issuer.tls) {
+        result = serve(express::tls::in::WebApp("IdpServer", app));
+    } else {
+        result = serve(express::legacy::in::WebApp("IdpServer", app));
+    }
+    return result;
 }

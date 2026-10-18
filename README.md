@@ -28,7 +28,7 @@ To embed the complete IDP, use the **[IdpMiddleware router](docs/idp-middleware.
 
 ## Quick start
 
-To install and deploy the IDP and optional styled browser application, **download and run only the shell script** using the [ten-step deployment guide](docs/package-deployment.md#banner). It installs Python and the published packages, downloads its matching helper automatically, and guides you through hostnames, certificates, Google login, email and verification. Certbot is installed only if you choose Let’s Encrypt.
+To install and deploy the IDP and optional styled browser application, **download and run only the shell script** using the [ten-step deployment guide](docs/package-deployment.md#banner). It installs Python and the published packages, downloads its matching helper automatically, and guides you through hostnames, certificates, Google login, email and verification. SNode.C serves HTTPS directly: for example IDP `https://core.snodec.org:8088` and application `https://core.vchrist.at` on port 443. Ports are configurable, and HTTP on port 80 redirects to the selected HTTPS origin. Certbot is installed only if you choose Let’s Encrypt; Nginx is not required. Use rebuilt direct-TLS packages, not the former loopback/proxy packages.
 
 The setup uses `/etc/snodec-idp/deployment.json`: saved values are editable defaults, secret input stays hidden, and a first deployment without that file has no prefilled answers. Installing packages alone does not configure or start the IDP.
 

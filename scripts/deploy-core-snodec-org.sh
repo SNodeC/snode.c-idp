@@ -38,7 +38,7 @@ installer_directory=$(mktemp -d /tmp/snodec-idp-install.XXXXXX)
 trap 'rm -rf -- "$installer_directory"' EXIT
 # Pin the helper by Git blob ID, independent of branch/tag movement. When deploy.py
 # changes, update this value using: git hash-object scripts/deploy.py
-helper_blob=4e32e910e1a7347092b5d0c13d636ebeb390ec60
+helper_blob=d816a268123adf20e2c33f32cc311c5c303b8c82
 curl --fail --silent --show-error --location --header 'Accept: application/vnd.github.raw+json' \
     "https://api.github.com/repos/SNodeC/snode.c-idp/git/blobs/$helper_blob" \
     --output "$installer_directory/deploy.py"
@@ -53,9 +53,9 @@ done
 sh "$installer_directory/snodec-idp.sh" --component server --component example "$@"
 # The SAME deployment helper now performs steps 4–10 interactively:
 # STEP 4 — Explain and collect IDP/application hostnames, exact OAuth callbacks and
-# optional redirects. Existing client registrations survive unless explicitly changed.
+# public HTTPS ports (e.g. IDP 8088/application 443) and optional redirects. Existing client registrations survive unless explicitly changed.
 # STEP 5 — Ask for public IPs, resolve every DNS name, inspect listeners, offer changes
-# to active UFW/firewalld and SELinux, and guide provider-firewall/proxy integration.
+# to active UFW/firewalld, and guide provider-firewall integration.
 # External actions pause for confirmation; DNS/HTTPS are checked, not merely listed.
 # STEP 6 — Explain Google Cloud Branding/Audience/Clients, show the exact callback,
 # collect the client ID and hidden secret, or explicitly disable Google federation.
@@ -65,7 +65,8 @@ sh "$installer_directory/snodec-idp.sh" --component server --component example "
 # Saved values are editable defaults (secrets hidden); absent JSON gives no defaults.
 # Examples are explanations only. Validate/save mode-600 JSON and back up old JSON.
 # STEP 9 — Install Certbot ONLY for Let's Encrypt or validate existing certificates;
-# preserve an operator-owned TLS proxy when chosen. Provision keys/data and services.
+# use standalone ACME validation on port 80. SNode.C serves public HTTPS directly.
+# Provision persistent keys/data, private systemd TLS credentials and services.
 # STEP 10 — Check HTTPS/redirects/renewal, send a real test email as the service user,
 # ask the operator to complete browser flows, and write a pass/fail/pending report.
 # Run the downloaded helper; the EXIT trap removes all temporary downloads.
