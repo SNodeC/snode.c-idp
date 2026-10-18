@@ -6,111 +6,201 @@
 
 # Install and deploy the packaged IDP
 
-The package build and deployment tooling is prepared locally. Packages must be built, signed and published before the repository installation commands below can succeed. No public release or root-server deployment is implied by this guide.
+This is the ten-step binary-package deployment procedure for `core.snodec.org`, its browser application and optional redirect hostnames. It follows the [project-specific Packages installation guides](https://github.com/SNodeC/Packages/blob/main/docs/installation/README.md#banner). Availability is per distribution and architecture; check step 1 before installing.
+
+The [commented shell script](../scripts/deploy-core-snodec-org.sh) follows the same ten steps. Review it, copy it to the root server and run `sudo bash deploy-core-snodec-org.sh` in an interactive terminal. It preserves existing configuration, opens an editor and asks before explicitly installing Certbot and deploying with Let's Encrypt. On Debian Sid, append `--suite sid`; use `--suite forky` if Forky is misdetected. You can instead execute the individual steps below. Commands use `sudo`; omit it when already logged in as root.
 
 ## Package selection
 
-| Package | Installs |
-| --- | --- |
-| `snodec-idp` | IDP executable, systemd unit, deployment helper and configuration example |
-| `snodec-idp-client-dev` | Client library, headers and `snodec-auth` CMake package |
-| `snodec-idp-server-dev` | Embeddable IDP library and its client development dependency |
-| `snodec-idp-example` | Optional styled application, static assets and systemd unit |
+| Package | Installer component | Installs |
+| --- | --- | --- |
+| `snodec-idp` | `server` | IDP executable, systemd unit, deployment helper and configuration example |
+| `snodec-idp-client-dev` | `client-dev` | Client library, headers and `snodec-auth` CMake package |
+| `snodec-idp-server-dev` | `server-dev` | Embeddable IDP library and its client development dependency |
+| `snodec-idp-example` | `example` | Optional styled application, static assets and systemd unit |
 
-Server installation does not require development packages or the example. Client development does not install the IDP server. The `auth-client`, `auth-idp` and `auth_idp` CMake install component names remain compatible; CPack maps them to distribution package names.
+This walkthrough selects `server` and `example`. Development packages are unnecessary for running them. Client development does not install the IDP server. Certificate tooling is an operator choice: Certbot is not an IDP package dependency. The helper used here specifically implements Let's Encrypt; certificates from another provider or an existing TLS proxy require separately configured deployment.
 
-## Before deployment
+## 1. Check package availability
 
-For `core.snodec.org`, the [commented deployment script](../scripts/deploy-core-snodec-org.sh) follows the individual steps below. Review it, copy it to the root server and run `sudo bash deploy-core-snodec-org.sh` in an interactive terminal. It preserves an existing configuration, opens an editor and asks before installing Certbot and deploying with Let's Encrypt.
+On the server, identify the installed OS and architecture:
 
-Use a supported native Linux distribution with systemd, Nginx and Certbot. IDP packages use the native DistributionPackages targets, including Raspberry Pi OS; there is no IDP OpenWrt recipe. Set DNS A/AAAA records for every public hostname to this server. Port 80 must reach Nginx for HTTP-01 challenges, and port 443 must be reachable by browsers. Remove incorrect AAAA records rather than relying on IPv4 fallback.
+```sh
+cat /etc/os-release
+uname -m
+```
 
-The helper manages only `/etc/nginx/conf.d/snodec-idp.conf`. It rejects an existing unrelated file there and exact hostname collisions in other Nginx sites. If Apache or another service owns ports 80/443, arrange the web-server integration before running setup. Existing unrelated Nginx sites remain operator-owned. Firewall and DNS changes are not performed by the helper.
+Check [SNode.C IDP availability](https://github.com/SNodeC/Packages/blob/main/status/snodec-idp.md) for that exact target. A successful build for another target is insufficient. Use the matching distribution guide linked from [Packages installation](https://github.com/SNodeC/Packages/blob/main/docs/installation/README.md#banner). IDP packages support native Linux targets, including Raspberry Pi OS; there is no IDP OpenWrt recipe. The deployment helper requires a systemd host.
 
-Keep the IDP and application on separate hostnames: browser cookies are not isolated by port. The service listeners bind to `127.0.0.1:8083` and `127.0.0.1:8084`. Ensure those internal ports are available.
-
-## Install published packages
-
-Configure the signed repository using the [Packages installation guide](https://github.com/SNodeC/Packages/blob/main/docs/installation/README.md#banner). Choose the installer’s `--prepare` mode when you want to select packages explicitly.
+## 2. Prepare download tools
 
 On Debian/Ubuntu:
 
 ```sh
 sudo apt-get update
-sudo apt-get install snodec-idp snodec-idp-example
+sudo apt-get install ca-certificates curl
 ```
 
-On Fedora/Rocky Linux:
+On Fedora/Rocky:
 
 ```sh
-sudo dnf install snodec-idp snodec-idp-example
+sudo dnf install ca-certificates curl
 ```
 
-The IDP package requires Nginx, Python, OpenSSL and systemd. Certificate tooling is an operator choice: Certbot is not a package dependency. The deployment helper in this guide specifically uses Let's Encrypt. If you use certificates from another provider or an existing TLS proxy, configure that deployment separately; this helper does not import external certificates.
-
-For this Let's Encrypt deployment, explicitly install Certbot:
+On Rocky, also enable the dependency repositories described by the [Rocky repository guide](https://github.com/SNodeC/Packages/blob/main/docs/repositories/rocky-linux.md#banner):
 
 ```sh
-sudo apt-get install certbot  # Debian/Ubuntu
-# Or on Fedora/Rocky Linux:
-sudo dnf install certbot
+sudo dnf install dnf-plugins-core epel-release
+sudo dnf config-manager --set-enabled crb
 ```
 
-On SELinux-enforcing hosts, authorize Nginx’s loopback proxy connections according to your local policy (commonly `httpd_can_network_connect`); the helper does not disable SELinux or change global policy. Certbot must provide `certbot.timer` or `certbot-renew.timer`.
+The next step downloads both installer files into the same directory. `snodec-idp.sh` delegates platform detection, signing-key configuration and repository setup to `install.sh`. See the [signing-key guide](https://github.com/SNodeC/Packages/blob/main/keys/README.md#banner) for repository trust details.
 
-## Configure one deployment
+## 3. Install the IDP and browser application
+
+Run the project-specific installer with explicit components:
 
 ```sh
-sudo install -d -m 755 /etc/snodec-idp
-sudo install -m 600 /usr/share/snodec-idp/deployment.example.json \
-  /etc/snodec-idp/deployment.json
-sudoedit /etc/snodec-idp/deployment.json
+(
+  set -eu
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  base=https://raw.githubusercontent.com/SNodeC/Packages/main/install
+  for script in install.sh snodec-idp.sh; do
+    curl -fsSL "$base/$script" -o "$tmp/$script"
+  done
+  sudo sh "$tmp/snodec-idp.sh" --component server --component example
+)
 ```
 
-Edit the supplied JSON:
+It configures the signed repository, refreshes indexes and installs the selected components and dependencies. On Debian Sid, append `--suite sid` to the installer invocation; use `--suite forky` if Forky is misdetected. This selects the installed release's repository; it does not upgrade the OS. For IDP-only deployment, omit `--component example` and remove `example` from step 8's configuration.
 
-- `hostname`: the IDP hostname, e.g. `core.snodec.org`.
-- `acme_email`: your real contact email. Set `accept_acme_terms` to `true` only after reviewing Let’s Encrypt’s subscriber agreement.
-- `clients`: client IDs mapped to exact HTTPS callback URL lists. There are no wildcard callbacks.
-- `redirects`: optional hostname-to-HTTPS-URL mapping, e.g. `core.vchrist.at` to your application. These hosts receive certificates too; redirects remain owned by the IDP host application.
-- `example`: optional object with a distinct application `hostname` and registered `client_id`. Remove this object to deploy only the IDP.
-- `google_client_id` and `google_client_secret`: both nonempty to enable Google.
-- `smtp_command`: trusted fixed mail command reading the complete message on stdin, e.g. `/usr/bin/msmtp -t`. Configure delivery credentials separately with permissions readable by the service account. Empty disables email delivery; no reset link is exposed in the browser.
+Verify both installed packages on Debian/Ubuntu:
 
-Do not commit this file or pass secrets as command-line arguments. It is the operator-maintained input; `idp.env`, `example.env`, Nginx configuration and public-key export are generated outputs. Change the JSON and re-run deployment rather than editing generated files.
+```sh
+dpkg-query -W -f='${Package} ${Version} ${Status}\n' snodec-idp snodec-idp-example
+```
 
-For Google, create a Web application OAuth client and register exactly:
+Or on Fedora/Rocky:
+
+```sh
+rpm -q snodec-idp snodec-idp-example
+```
+
+Installing the IDP packages does not provision or start their services. Distribution dependency packages such as Nginx may have their own installation hooks. Repository-only preparation remains available as `install.sh --prepare`, but is unnecessary before the project-specific installer.
+
+## 4. Choose the application hostname and redirects
+
+`core.snodec.org` serves the IDP. Choose a distinct application hostname: cookies are not isolated by port. The example callback must be exactly `https://APPLICATION_HOST/auth/callback`.
+
+`core.vchrist.at` can serve the application **or** redirect to it. If it is the application hostname, remove its entry from `redirects`; one hostname cannot have both roles. Otherwise set its redirect destination to the real application URL. Do not leave `app.example.org` from the template in the production configuration.
+
+## 5. Verify DNS, ports and web-server ownership
+
+Verify the existing A/AAAA records for `core.snodec.org` reach this root server. Check the application and every redirect hostname too: all configured names are included in the certificate. Remove incorrect AAAA records rather than relying on IPv4 fallback.
+
+Allow inbound TCP 80 and 443 through both provider and host firewalls. Port 80 handles ACME HTTP-01 validation and redirects other requests to HTTPS. Keep backend ports 8083/8084 private; services bind to loopback. Inspect existing listeners with `sudo ss -ltnp` and ensure those internal ports are available.
+
+The helper manages `/etc/nginx/conf.d/snodec-idp.conf`. It rejects unrelated content there and exact hostname collisions with other Nginx sites. Reconcile any existing Apache/Nginx ownership of the requested hosts first. DNS, firewall rules and unrelated sites remain operator-managed. On SELinux-enforcing hosts, authorize Nginx loopback proxy connections according to local policy (commonly `httpd_can_network_connect`); the helper does not change SELinux policy.
+
+## 6. Prepare Google login
+
+For Google login, configure OAuth branding/audience and create a Web application OAuth client with this exact authorized redirect URI:
 
 ```text
 https://core.snodec.org/auth/federated/google/callback
 ```
 
-This differs from your application callback. Configure Google’s branding/audience and production requirements in your Google account. The IDP requests `openid email profile`. A Google identity still needs IDP TOTP enrollment; equal-email local accounts are not automatically linked. See [Google federation](local-deployment.md#12-optional-google-login).
+This is Google's callback to the IDP, separate from your application's `/auth/callback`. Retain the client ID and secret for step 8. If the Google audience is in testing, configure the intended test users. Leave both Google fields empty to disable federation while retaining local login.
 
-## Validate and deploy
+The IDP requests `openid email profile`. Google identities still require IDP TOTP enrollment; equal-email local accounts are not automatically linked. See [Google federation](local-deployment.md#12-optional-google-login) for account-flow details.
+
+## 7. Prepare outgoing email
+
+Install and configure a mail delivery program such as `msmtp` with your SMTP server, TLS, sender and credentials. The fixed command, for example `/usr/bin/msmtp -t`, must accept the complete message on stdin. Enter it as `smtp_command` in step 8.
+
+Use a system configuration accessible to the `snodec-idp` service user; its sandbox hides home directories. The deployment helper creates that user during provisioning. After it exists, grant only the required access and verify delivery as that user. The helper does not install/configure an SMTP account or mail program. Empty `smtp_command` disables delivery; reset links are never exposed in the browser as a substitute for email.
+
+## 8. Configure the deployment
+
+Create the configuration directory:
+
+```sh
+sudo install -d -m 755 /etc/snodec-idp
+```
+
+**On first setup only**, copy the template; do not overwrite an existing deployment configuration:
+
+```sh
+sudo install -m 600 /usr/share/snodec-idp/deployment.example.json \
+  /etc/snodec-idp/deployment.json
+```
+
+Then edit it:
+
+```sh
+sudoedit /etc/snodec-idp/deployment.json
+sudo chmod 600 /etc/snodec-idp/deployment.json
+```
+
+Set every applicable field:
+
+- `hostname`: `core.snodec.org`.
+- `acme_email`: your real contact email. Set `accept_acme_terms` to `true` after reviewing [Let's Encrypt's subscriber agreement](https://letsencrypt.org/repository/).
+- `clients`: client IDs mapped to exact HTTPS callback URL lists. For the example, register `https://APPLICATION_HOST/auth/callback` under `minimal-mfa-app`. Wildcard callbacks are unsupported.
+- `example`: set `hostname` to the chosen application host and `client_id` to `minimal-mfa-app`. Remove this object for IDP-only deployment.
+- `redirects`: optional hostname-to-HTTPS-URL mapping, such as `core.vchrist.at` to the application URL. Remove it if that host serves the application instead.
+- `google_client_id` and `google_client_secret`: both populated to enable Google, or both empty.
+- `smtp_command`: the fixed mail command from step 7, or empty to disable delivery.
+
+Do not commit secrets or pass them in shell arguments. This JSON is the operator-maintained input; `idp.env`, `example.env`, Nginx configuration and the public-key export are generated outputs. Edit the JSON and rerun deployment to change them.
+
+## 9. Explicitly install Certbot and deploy with Let's Encrypt
+
+For this Let's Encrypt deployment, install Certbot yourself on Debian/Ubuntu:
+
+```sh
+sudo apt-get install certbot
+```
+
+Or on Fedora/Rocky:
+
+```sh
+sudo dnf install certbot
+```
+
+Certbot must provide `certbot.timer` or `certbot-renew.timer`. If you use another certificate provider, configure that deployment separately: this helper does not import external certificates.
+
+Validate and deploy:
 
 ```sh
 sudo snodec-idp-deploy /etc/snodec-idp/deployment.json --check
 sudo snodec-idp-deploy /etc/snodec-idp/deployment.json
 ```
 
-`--check` validates configuration only. Actual deployment checks prerequisites and hostname ownership, creates service users and initial keys, writes generated configuration, enables HTTP-01 handling, obtains a Let’s Encrypt certificate, enables HTTPS and starts the services. HTTP redirects with status 308 to the same hostname/path over HTTPS, except the challenge directory.
+`--check` validates configuration only; it does not verify DNS, networking or external credentials. Actual deployment checks prerequisites and hostname ownership, creates service users and initial keys/data, configures loopback listeners and Nginx, obtains certificates for all configured names, starts services and enables the existing Certbot renewal timer. HTTP redirects with status 308 to HTTPS except for ACME challenges. A renewal deploy hook validates/reloads Nginx.
 
-The helper uses the distribution’s existing Certbot renewal timer and installs a deploy hook that validates/reloads Nginx after renewal. Certbot retains ownership of its certificate/account/renewal files. Re-running setup reuses existing keys and certificates; a database without its original signing or TOTP key is rejected.
+Re-running setup preserves keys and accounts and restarts configured services. A database without its original signing or TOTP key is rejected. Existing-account updates first save a SQLite backup, keys and configuration under `/var/lib/snodec-idp/backups/`. A failed Nginx syntax check restores the previous site file, but deployment is not a complete rollback transaction: earlier provisioning steps may remain. Inspect errors and journals before retrying; never delete account data or keys to recover from a setup failure.
 
-If a later operation fails, inspect the reported error and service journal before retrying. A failed Nginx syntax check restores the previous site file. Deployment is not a complete multi-service rollback transaction: previously completed provisioning steps remain, and can be retried. Existing-account updates first save a SQLite backup, keys and configuration under `/var/lib/snodec-idp/backups/`.
-
-## Verify the public deployment
+## 10. Verify HTTPS, renewal and browser flows
 
 ```sh
 curl -I http://core.snodec.org/auth/login
 curl --fail https://core.snodec.org/health
-sudo systemctl status snodec-idp nginx
-sudo systemctl list-timers --all | grep certbot
+sudo systemctl --no-pager status snodec-idp nginx
+sudo systemctl list-timers --all --no-pager 'certbot*'
 sudo certbot renew --cert-name snodec-idp --dry-run
 ```
 
-Verify the application homepage, protected-page redirect, registration, TOTP activation, successful callback, logout/relogin, password recovery email and Google login in a browser. Confirm configured redirect hostnames return their destination and unconfigured hosts are not routed to the IDP. Existing unrelated Nginx hosts retain their own behavior. The helper checks public IDP HTTPS health; it cannot complete Google consent, read delivered mail or prove the full user flow automatically.
+Expect HTTP 308 with an HTTPS location and a successful public HTTPS health response without bypassing certificate verification. The renewal dry-run contacts Certbot's staging service; it does not replace the live certificate. Verify HTTPS and redirect behavior on the other configured hosts as well.
+
+Open the application in a browser and complete registration, TOTP enrollment, login back to `/private`, logout/relogin, Google login if enabled, and password reset using actual delivered mail. Check account settings and configured hostname redirects. The [local account-flow walkthrough](local-deployment.md) describes the UI flows; use your public hostnames here instead of localhost URLs. The helper's health check cannot prove Google consent or mail delivery.
+
+For troubleshooting:
+
+```sh
+sudo journalctl -u snodec-idp -u snodec-idp-example -u nginx
+```
 
 ## Upgrades, backups and removal
 
@@ -132,4 +222,4 @@ ctest --test-dir build/codex/packages --output-on-failure
 
 Native packaging uses the installed SNode.C development packages and normal distribution dependency discovery. Package inventories derive from CPack components. CI starts only for version tags, explicit manual release builds, or authenticated dependent-build requests after SNode.C publication. Ordinary documentation/source branch pushes do not start package builds. Source changes become package releases through matching `vMAJOR.MINOR.PATCH` tags.
 
-CI builds unsigned artifacts; DistributionPackages validates their repository, workflow, run, target and capture, then signs and publishes them. Runtime credentials, ACME state and signing secrets never enter the IDP build workflow. Before enabling the dependency chain, merge its DistributionPackages integration and the IDP workflow, then deliberately create the IDP’s initial matching release tag. No tag or build dispatch was created during implementation.
+CI builds unsigned artifacts; DistributionPackages validates their repository, workflow, run, target and capture, then signs and publishes them. Runtime credentials, ACME state and signing secrets never enter the IDP build workflow. Check the published target status before deploying; a source merge or successful build alone does not establish signed package availability. Documentation updates do not require a release tag or workflow dispatch.

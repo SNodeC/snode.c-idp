@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Deploy core.snodec.org from the SNode.C binary package repository.
+# Matching ten-step prose guide:
+# https://github.com/SNodeC/snode.c-idp/blob/main/docs/package-deployment.md
 # Run ON THE ROOT SERVER, after reviewing this file:
 #   sudo bash deploy-core-snodec-org.sh
 # On Debian Sid, append --suite sid; use --suite forky if Forky is misdetected.

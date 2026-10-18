@@ -18,7 +18,9 @@ The project provides an IDP with password login, TOTP, OAuth2 Authorization Code
 - [Styled example application](examples/minimal-mfa-app/README.md#banner)
 - [Packaging integration checklist](docs/package-deployment-plan.md#banner)
 
-Start with the **[step-by-step local deployment walkthrough](docs/local-deployment.md)** to build and run the full IDP and browser application, create accounts, enroll MFA, exercise login/logout and recovery, and back up the deployment.
+For a public server such as `core.snodec.org`, follow the **[ten-step binary-package deployment guide](docs/package-deployment.md#1-check-package-availability)** or its **[commented shell script](scripts/deploy-core-snodec-org.sh)**. They use the project-specific package installer and explicitly install Certbot only for the Let’s Encrypt deployment.
+
+For source-based development on localhost, start with the **[step-by-step local deployment walkthrough](docs/local-deployment.md)** to build and run the full IDP and browser application, create accounts, enroll MFA, exercise login/logout and recovery, and back up the deployment.
 
 Read the **[IDP and client guide](docs/idp-and-client-guide.md)** for configuration, native and Docker deployment, a complete minimal client application, API details, account workflows, operations, and troubleshooting. It documents the inspected source revision and known limitations, including differences from older project documentation. Read its compatibility and limitations sections before deployment.
 

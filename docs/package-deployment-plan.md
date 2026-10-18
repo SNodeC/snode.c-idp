@@ -6,13 +6,13 @@
 
 # Package and deployment integration
 
-This is the implementation and release checklist for packaging the IDP and its styled example application. No package workflow, publication or remote deployment is authorized by this checklist alone. The current task explicitly leaves package-build workflows untriggered.
+This is the implementation and release checklist for packaging the IDP and its styled example application. No package workflow, publication or remote deployment is authorized by this checklist alone. The operator procedure is the [ten-step package deployment guide](package-deployment.md#1-check-package-availability), mirrored by the [commented script](../scripts/deploy-core-snodec-org.sh).
 
 ## Responsibilities
 
 The IDP repository owns the server, reusable authentication libraries, example client, CPack components and deployment command. DistributionPackages owns target selection, captured source revisions, dependency provenance, artifact validation, signing and publication. The SNodeC control repository owns canonical documentation navigation.
 
-A product publication must preserve all other products in that target's package feed. Extending the existing two-product pipeline requires removing assumptions about a single counterpart. Dependency rebuilds must consume the exact published SNode.C packages that initiated them. MQTTSuite publication and OpenWrt support must remain intact.
+A product publication must preserve all other products in that target's package feed. The three-product pipeline must not assume a single counterpart. Dependency rebuilds must consume the exact published SNode.C packages that initiated them. MQTTSuite publication and OpenWrt support must remain intact.
 
 Installation supplies software without opening a public listener. Deployment is an explicit operator action. Re-running deployment must preserve account data and cryptographic keys. Existing databases without their original signing or TOTP key must fail closed; deployment must never generate replacement keys for them.
 
@@ -45,14 +45,14 @@ The optional example is configured with the public IDP URL, its client ID, callb
 4. Verify the styled client and authentication flow against disposable local services.
 5. Run DistributionPackages tests for three-product capture, authenticated handoffs, sibling preservation and dependency dispatch.
 6. Generate and audit canonical documentation navigation.
-7. Review and commit changes locally. Do not create release tags or dispatch package workflows in this task.
+7. Review and merge the intended source and documentation changes. Keep publication a separate authorized action.
 8. After separate authorization, build/publish and verify installation from the signed repository.
 9. Only then deploy to the root server and verify real HTTPS, renewal, Google login, MFA, recovery mail and hostname routing.
 
 Public deployment still requires the server OS/access, existing port 80/443 ownership, application hostname, redirect destinations, Google credentials and mail configuration. Local tests cannot establish that public DNS, ACME issuance or external Google/mail flows work.
 
-## Local implementation status
+## Implementation and deployment status
 
-The styled client is now version-controlled under `examples/minimal-mfa-app`. CPack definitions, deployment helper and package workflow are implemented. The concrete operator procedure is in [Install and deploy the packaged IDP](package-deployment.md#banner). DistributionPackages and the canonical navigation repository have companion changes.
+The styled client is now version-controlled under `examples/minimal-mfa-app`. CPack definitions, deployment helper and package workflow are implemented. The concrete operator procedure is in [Install and deploy the packaged IDP](package-deployment.md#banner). DistributionPackages owns project-specific installer selection, signed repository setup and publication; canonical navigation is maintained in the organization control repository. Certbot is not an IDP package dependency and is installed explicitly for the Let’s Encrypt workflow.
 
-Local verification covers full/client-only builds, installed consumers, authentication tests, generated DEB/RPM contents, disposable deployment tests, Nginx syntax, HTTPS authentication flows and the styled example in Chromium. Public package builds, signing/publication, installation from the live repository, real ACME issuance/renewal, Google consent and external mail delivery remain release/deployment gates. They were not triggered by this implementation.
+Local verification covers full/client-only builds, installed consumers, authentication tests, generated DEB/RPM contents, disposable deployment tests, Nginx syntax, HTTPS authentication flows and the styled example in Chromium. Check [published IDP target availability](https://github.com/SNodeC/Packages/blob/main/status/snodec-idp.md) before installation. A passing local check does not establish signed publication or successful root-server deployment. Installation from the signed repository, real ACME issuance/renewal, Google consent and external mail delivery must be verified for the selected deployment.
