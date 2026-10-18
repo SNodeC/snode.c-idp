@@ -8,6 +8,8 @@
 
 Build, configure and operate the identity provider and its application integration.
 
+For `core.snodec.org` and other public deployments, use the [ten-step binary-package guide](package-deployment.md#1-check-package-availability) and [commented deployment script](../scripts/deploy-core-snodec-org.sh). The local walkthrough below is for source-based development on localhost.
+
 ## Sections
 
 <!-- snodec:begin section-pages -->
