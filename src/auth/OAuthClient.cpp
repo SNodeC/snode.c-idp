@@ -26,6 +26,7 @@ namespace snodec::auth {
                                          {"client_id", clientId_},
                                          {"redirect_uri", callbackUrl_},
                                          {"scope", "openid profile email"},
+                                         {"acr_values", "urn:snodec:acr:mfa"},
                                          {"state", login.state},
                                          {"nonce", transaction.nonce},
                                          {"code_challenge", sha256(transaction.verifier)},

@@ -62,6 +62,9 @@ namespace snodec::auth {
         if (claims.purpose == "id" && !claims.nonce.empty()) {
             payload["nonce"] = claims.nonce;
         }
+        if (claims.purpose == "id" && claims.mfaVerified) {
+            payload["acr"] = "urn:snodec:acr:mfa";
+        }
         const std::string input = base64Url(header.dump()) + "." + base64Url(payload.dump());
         std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new_mem_buf(privateKeyPem_.data(), static_cast<int>(privateKeyPem_.size())),
                                                       BIO_free);

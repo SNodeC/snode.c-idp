@@ -352,7 +352,18 @@ access cookie while setting a fresh OAuth transaction cookie. An explicit
 Authorization header or a non-GET/HEAD request receives 401 on authentication
 failure; state-changing requests are not replayed through login.
 `AuthMiddleware(client).handler()` always uses the non-redirecting response style.
-Both apply the same MFA and live-session policy. Failed callbacks remain 401,
+Both apply the same MFA and live-session policy. The browser client requests
+`acr_values=urn:snodec:acr:mfa`; MFA-verified ID tokens report the same value in
+`acr`, derived from the actual session assurance. The IDP completes TOTP verification or enrollment
+before issuing a code for that request, including when an existing password-only
+session is reused. Required enrollment cannot be skipped. The original callback,
+state, nonce and PKCE challenge remain attached to the same transaction. A
+successful step-up replaces the weaker session; it never marks an unverified
+session as MFA-verified. Requests without `acr_values` retain optional MFA at the
+IDP; clients still reject password-only tokens. Unknown assurance values are
+rejected. No new deployment setting is needed.
+
+Failed callbacks remain 401,
 preventing automatic retries when the completed login itself is rejected.
 Cookie-authenticated mutations require an Origin matching the configured callback
 origin. Bearer-authenticated requests do not use ambient cookie authentication.
@@ -538,7 +549,7 @@ These tests are not a penetration test or an exhaustive security audit.
 | Startup rejects configuration | Matching issuer/base origin, existing RSA PEM and exactly 32-byte TOTP key |
 | Callback rejected | Matching state cookie, initiating worker, transaction age, nonce, PKCE and configured callback URL |
 | Stale login form | A newer IDP login replaced that browser transaction; restart the old tab |
-| Protected request denied after successful password login | Enroll and complete TOTP; shared application policy requires MFA |
+| Password-only account signs in to an MFA application | Complete the enrollment offered by the IDP, then return automatically to the application; clients must send `acr_values=urn:snodec:acr:mfa` |
 | Protected request denied despite a valid JWT signature | IDP reachability, live session, revocation, token purpose and MFA claim |
 | HTTP 403 on form submission | Browser Origin must match the configured public origin; proxies must preserve it |
 | Reset email missing | Installed delivery command/configuration; absence never exposes a reset link |
