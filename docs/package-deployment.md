@@ -21,6 +21,8 @@ Server installation does not require development packages or the example. Client
 
 ## Before deployment
 
+For `core.snodec.org`, the [commented deployment script](../scripts/deploy-core-snodec-org.sh) follows the individual steps below. Review it, copy it to the root server and run `sudo bash deploy-core-snodec-org.sh` in an interactive terminal. It preserves an existing configuration, opens an editor and asks before installing Certbot and deploying with Let's Encrypt.
+
 Use a supported native Linux distribution with systemd, Nginx and Certbot. IDP packages use the native DistributionPackages targets, including Raspberry Pi OS; there is no IDP OpenWrt recipe. Set DNS A/AAAA records for every public hostname to this server. Port 80 must reach Nginx for HTTP-01 challenges, and port 443 must be reachable by browsers. Remove incorrect AAAA records rather than relying on IPv4 fallback.
 
 The helper manages only `/etc/nginx/conf.d/snodec-idp.conf`. It rejects an existing unrelated file there and exact hostname collisions in other Nginx sites. If Apache or another service owns ports 80/443, arrange the web-server integration before running setup. Existing unrelated Nginx sites remain operator-owned. Firewall and DNS changes are not performed by the helper.
@@ -44,7 +46,17 @@ On Fedora/Rocky Linux:
 sudo dnf install snodec-idp snodec-idp-example
 ```
 
-The IDP package requires Nginx, Certbot, Python, OpenSSL and systemd. On SELinux-enforcing hosts, authorize Nginx’s loopback proxy connections according to your local policy (commonly `httpd_can_network_connect`); the helper does not disable SELinux or change global policy. Certbot must provide `certbot.timer` or `certbot-renew.timer`.
+The IDP package requires Nginx, Python, OpenSSL and systemd. Certificate tooling is an operator choice: Certbot is not a package dependency. The deployment helper in this guide specifically uses Let's Encrypt. If you use certificates from another provider or an existing TLS proxy, configure that deployment separately; this helper does not import external certificates.
+
+For this Let's Encrypt deployment, explicitly install Certbot:
+
+```sh
+sudo apt-get install certbot  # Debian/Ubuntu
+# Or on Fedora/Rocky Linux:
+sudo dnf install certbot
+```
+
+On SELinux-enforcing hosts, authorize Nginx’s loopback proxy connections according to your local policy (commonly `httpd_can_network_connect`); the helper does not disable SELinux or change global policy. Certbot must provide `certbot.timer` or `certbot-renew.timer`.
 
 ## Configure one deployment
 
