@@ -1,0 +1,22 @@
+[Unit]
+Description=SNode.C identity provider
+After=network.target
+ConditionPathExists=/etc/snodec-idp/idp.env
+
+[Service]
+User=snodec-idp
+Group=snodec-idp
+EnvironmentFile=/etc/snodec-idp/idp.env
+WorkingDirectory=/var/lib/snodec-idp
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/auth_idp --config-file /etc/snodec-idp/empty.conf IdpServer local --host 127.0.0.1
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/snodec-idp
+
+[Install]
+WantedBy=multi-user.target

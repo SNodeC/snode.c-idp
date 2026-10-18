@@ -1,0 +1,20 @@
+[Unit]
+Description=SNode.C MFA example application
+After=network.target snodec-idp.service
+ConditionPathExists=/etc/snodec-idp/example.env
+
+[Service]
+User=snodec-idp-example
+Group=snodec-idp-example
+EnvironmentFile=/etc/snodec-idp/example.env
+WorkingDirectory=@CMAKE_INSTALL_FULL_DATADIR@/snodec-idp/example
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/minimal-mfa-app --config-file /etc/snodec-idp/empty.conf MinimalMfaApp local --host 127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

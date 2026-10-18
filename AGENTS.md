@@ -15,7 +15,7 @@ diagnostics. Do not reintroduce Easylogging++ macros or compatibility wrappers.
 
 The root formatting/analysis configurations and `cmake/` formatting modules
 come from the shared canonical baseline. Preserve their style settings.
-Module discovery includes `tests/` as well as `src/`, and excludes `src/supplement/`, build directories, and
+Module discovery includes `examples/` and `tests/` as well as `src/`, and excludes `src/supplement/`, build directories, and
 checkouts from C++ formatting so vendored code is not rewritten.
 
 `cmake --build <build-dir> --target format` explicitly formats project C++ and
@@ -84,3 +84,7 @@ build/CTest side effects. Use fresh disposable work directories under the task's
 temporary build root and loopback listeners. Keep real provider/mail credentials
 out of fixtures. Report unavailable Google/SMTP/Docker checks separately from
 local browser, mail-sink and TLS results, and verify no test listener remains.
+
+## Packaging and deployment
+
+CPack maps the existing install components to server, client-dev, server-dev and optional example packages. Package installation never activates services. `scripts/deploy.py` is the explicit systemd/Nginx/Certbot deployment boundary; configuration is an operator-owned JSON file and generated environment files are not another authority. Run `python3 tests/deployment.py` for disposable configuration/key/rollback checks. Never dispatch package workflows or create release tags merely to validate a packaging change.
