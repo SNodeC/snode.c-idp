@@ -87,4 +87,8 @@ local browser, mail-sink and TLS results, and verify no test listener remains.
 
 ## Packaging and deployment
 
-CPack maps the existing install components to server, client-dev, server-dev and optional example packages. Package installation never activates services. `scripts/deploy.py` is the explicit systemd/Nginx/Certbot deployment boundary; configuration is an operator-owned JSON file and generated environment files are not another authority. Run `python3 tests/deployment.py` for disposable configuration/key/rollback checks. Never dispatch package workflows or create release tags merely to validate a packaging change.
+CPack maps the existing install components to server, client-dev, server-dev and optional example packages. Package installation never activates services. `scripts/deploy.py` is the explicit systemd/TLS deployment boundary; configuration is an operator-owned JSON file and generated environment files are not another authority. Run `python3 tests/deployment.py` for disposable configuration/key/rollback checks. Never dispatch package workflows or create release tags merely to validate a packaging change.
+
+The shell bootstrap delegates interactive configuration and provisioning to this same helper. Keep deployment.json as the sole operator input: saved values become editable defaults, secrets stay hidden, and absent JSON supplies no deployment defaults. Certificate tooling follows the chosen TLS owner. Deployment tests must use disposable files and mocked system changes; never contact ACME, Google or real SMTP as a test side effect.
+
+The bootstrap downloads deploy.py by its pinned Git blob ID. Whenever that helper changes, update helper_blob in the shell script with `git hash-object scripts/deploy.py`; deployment tests verify the pin. Users download and execute only the shell script.

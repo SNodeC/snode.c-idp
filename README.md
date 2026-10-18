@@ -18,7 +18,7 @@ The project provides an IDP with password login, TOTP, OAuth2 Authorization Code
 - [Styled example application](examples/minimal-mfa-app/README.md#banner)
 - [Packaging integration checklist](docs/package-deployment-plan.md#banner)
 
-For a public server such as `core.snodec.org`, follow the **[ten-step binary-package deployment guide](docs/package-deployment.md#1-check-package-availability)** or its **[commented shell script](scripts/deploy-core-snodec-org.sh)**. They use the project-specific package installer and explicitly install Certbot only for the Let’s Encrypt deployment.
+For a public server such as `core.snodec.org`, use the **[detailed ten-step deployment guide](docs/package-deployment.md#banner)** for installation, certificates, Google login, email setup and verification.
 
 For source-based development on localhost, start with the **[step-by-step local deployment walkthrough](docs/local-deployment.md)** to build and run the full IDP and browser application, create accounts, enroll MFA, exercise login/logout and recovery, and back up the deployment.
 
@@ -27,6 +27,12 @@ Read the **[IDP and client guide](docs/idp-and-client-guide.md)** for configurat
 To embed the complete IDP, use the **[IdpMiddleware router](docs/idp-middleware.md)** with explicit constructor configuration. The standalone server uses the same implementation, selects its IDP VHost from the issuer URL, and supports an optional [`HOST_REDIRECTS` mapping](docs/idp-and-client-guide.md#host-routing-and-client-redirects) for additional hostnames.
 
 ## Quick start
+
+To install and deploy the IDP and optional styled browser application, **download and run only the shell script** using the [ten-step deployment guide](docs/package-deployment.md#banner). It installs Python and the published packages, downloads its matching helper automatically, and guides you through hostnames, certificates, Google login, email and verification. Certbot is installed only if you choose Let’s Encrypt.
+
+The setup uses `/etc/snodec-idp/deployment.json`: saved values are editable defaults, secret input stays hidden, and a first deployment without that file has no prefilled answers. Installing packages alone does not configure or start the IDP.
+
+For client-library development from source, use the commands below.
 
 The 2.0 API shares one `OAuthClient` between middleware and callback handling, requires MFA, and checks live IDP sessions. Upgrade applications and the IDP together; see the guide for schema and configuration migration.
 

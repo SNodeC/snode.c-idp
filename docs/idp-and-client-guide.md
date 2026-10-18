@@ -22,7 +22,7 @@ run started isolated loopback IDP/client processes and TLS proxies with disposab
 keys and accounts. No existing deployment or user database was used. The live-test
 section below separates verified local behavior from unavailable external services.
 
-For public deployment on `core.snodec.org` using the binary repository, follow the **[ten-step package deployment guide](package-deployment.md#1-check-package-availability)** and its **[commented script](../scripts/deploy-core-snodec-org.sh)**. For source-based localhost development and account-flow details, follow the **[local deployment walkthrough](local-deployment.md)**.
+For public deployment on `core.snodec.org` using the binary repository, follow the **[ten-step package deployment guide](package-deployment.md#banner)** and its **[interactive script](../scripts/deploy-core-snodec-org.sh)**. For source-based localhost development and account-flow details, follow the **[local deployment walkthrough](local-deployment.md)**.
 
 ## Architecture and trust boundaries
 

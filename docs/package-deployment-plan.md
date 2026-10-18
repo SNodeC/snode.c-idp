@@ -6,7 +6,7 @@
 
 # Package and deployment integration
 
-This is the implementation and release checklist for packaging the IDP and its styled example application. No package workflow, publication or remote deployment is authorized by this checklist alone. The operator procedure is the [ten-step package deployment guide](package-deployment.md#1-check-package-availability), mirrored by the [commented script](../scripts/deploy-core-snodec-org.sh).
+This is the implementation and release checklist for packaging the IDP and its styled example application. No package workflow, publication or remote deployment is authorized by this checklist alone. The operator procedure is the [ten-step package deployment guide](package-deployment.md#banner), mirrored by the [interactive script](../scripts/deploy-core-snodec-org.sh).
 
 ## Responsibilities
 
@@ -25,13 +25,13 @@ Installation supplies software without opening a public listener. Deployment is 
 | `snodec-idp-server-dev` | Embeddable IDP library and its development dependencies |
 | `snodec-idp-example` | Optional styled relying-party application and assets |
 
-Native DEB/RPM targets use the existing distribution matrix. The deployment helper targets systemd hosts with Nginx and Certbot; OpenWrt deployment is outside this helper's scope. Package inventory must derive from CPack components, rather than a second hand-maintained package list.
+Native DEB/RPM targets use the existing distribution matrix. The deployment helper targets systemd hosts with managed Nginx or an existing proxy; Certbot is optional for Let’s Encrypt; OpenWrt deployment is outside this helper's scope. Package inventory must derive from CPack components, rather than a second hand-maintained package list.
 
 ## Deployment contract
 
-The operator supplies the public IDP hostname, application hostname/callback registrations, optional hostname redirects, ACME contact email and acceptance of the ACME terms. Google credentials and mail settings belong in a protected server-side configuration file. They must never enter workflow logs, repository files or command-line arguments.
+The operator supplies the public IDP hostname, application hostname/callback registrations, optional hostname redirects and certificate ownership. Let’s Encrypt additionally requires an ACME contact email and acceptance of its terms. Google credentials and mail settings belong in a protected server-side configuration file. They must never enter workflow logs, repository files or command-line arguments.
 
-Nginx terminates HTTPS and forwards the original Host and Origin to a loopback-only IDP. HTTP requests redirect to HTTPS, except for the ACME HTTP-01 challenge location. Certbot owns certificate issuance and renewal; a deploy hook reloads Nginx after successful renewal. All configured HTTPS redirect hostnames need certificate coverage too.
+Nginx terminates HTTPS and forwards the original Host and Origin to a loopback-only IDP. HTTP requests redirect to HTTPS, except for the ACME HTTP-01 challenge location. In Let’s Encrypt mode, Certbot owns certificate issuance and renewal; a deploy hook reloads Nginx after successful renewal. Existing PEM files and an operator-owned same-server proxy are alternative modes; their renewal remains operator-owned. All configured HTTPS redirect hostnames need certificate coverage too.
 
 The setup command must validate input and existing web-server ownership before changing configuration. It must not replace unrelated Nginx sites. Configuration validation precedes reloads. Accounts, database files and private keys belong in persistent service-owned storage, outside package payloads. Removal of software does not remove account data.
 

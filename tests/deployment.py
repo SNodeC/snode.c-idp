@@ -1,4 +1,7 @@
 """Deployment boundaries on disposable files; never issue certificates or start services."""
+from contextlib import closing
+import hashlib
+import re
 import importlib.util
 import json
 import io
@@ -21,6 +24,44 @@ class DeploymentTest(unittest.TestCase):
     def setUp(self):
         self.config = json.loads((ROOT / 'packaging/deployment.example.json').read_text())
         self.config['accept_acme_terms'] = True
+
+    def test_bootstrap_downloads_pinned_helper_and_cleans_up_on_failure(self):
+        script = (ROOT / 'scripts/deploy-core-snodec-org.sh').read_text()
+        helper = (ROOT / 'scripts/deploy.py').read_bytes()
+        blob = hashlib.sha1(b'blob ' + str(len(helper)).encode() + b'\0' + helper).hexdigest()
+        self.assertEqual(re.search(r'^helper_blob=(\w+)$', script, re.M).group(1), blob)
+        # Exercise the actual download/install/launch sequence with fake external
+        # commands. No root, package installation, network or services are needed.
+        sequence = script[script.index('installer_directory=$(mktemp'):]
+        for failure in (False, True):
+            with self.subTest(download_failure=failure), tempfile.TemporaryDirectory() as tmp:
+                harness = """set -eu
+curl() {
+    printf 'download %s\n' "$*" >> "$TEST_LOG"
+    local status=0
+    if [ "$FAIL_DOWNLOAD" = yes ]; then
+        status=22
+    else
+        printf '# fixture\n' > "${@: -1}"
+    fi
+    return "$status"
+}
+sh() { printf 'install %s\n' "$*" >> "$TEST_LOG"; }
+python3() {
+    test -f "$1"
+    printf 'launch %s\n' "$*" >> "$TEST_LOG"
+}
+""" + sequence
+                log = Path(tmp) / 'commands'
+                result = subprocess.run(['bash', '-c', harness], capture_output=True, text=True,
+                    env=os.environ | {'TEST_LOG': str(log), 'FAIL_DOWNLOAD': 'yes' if failure else 'no'})
+                commands = log.read_text()
+                self.assertIn('/git/blobs/' + blob, commands)
+                self.assertEqual(result.returncode, 22 if failure else 0, result.stderr)
+                self.assertEqual('launch ' in commands, not failure)
+                self.assertEqual('install ' in commands, not failure)
+                temporary = re.search(r'--output (.+)/deploy.py', commands).group(1)
+                self.assertFalse(Path(temporary).exists())
 
     def test_public_origins_and_registered_example(self):
         self.assertEqual(deploy.validate(self.config), ['app.example.org', 'core.snodec.org', 'core.vchrist.at'])
@@ -75,43 +116,52 @@ class DeploymentTest(unittest.TestCase):
                 deploy.install_site('replacement')
 
     def test_deployment_restart_preserves_accounts_and_keys(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            commands = []
-            real_run, real_write = deploy.run, deploy.write
-            def command(*args):
-                commands.append(args)
-                result = real_run(*args) if args[0] == 'openssl' else ''
-                return result
-            def write(path, content, mode=0o600):
-                target = path if path.is_relative_to(root) else root / str(path).lstrip('/')
-                real_write(target, content, mode)
-            with patch.object(deploy, 'CONFIG', root / 'etc/config'), patch.object(deploy, 'DATA', root / 'data'), \
-                 patch.object(deploy, 'WEBROOT', root / 'webroot'), patch.object(deploy, 'CERT', root / 'cert'), \
-                 patch.object(deploy, 'SITE', root / 'site.conf'), patch.object(deploy, 'preflight', return_value='certbot.timer'), \
-                 patch.object(deploy, 'run', side_effect=command), patch.object(deploy, 'write', side_effect=write), \
-                 patch.object(deploy.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
-                 patch.object(deploy.urllib.request, 'urlopen', side_effect=lambda *args, **kwargs: io.BytesIO(b'{"status":"ok"}')):
-                previous = os.umask(0o077)
-                try:
-                    deploy.deploy(self.config)
-                    with sqlite3.connect(root / 'data/auth.db') as db:
-                        db.execute('create table account (name text)')
-                        db.execute("insert into account values ('preserve-me')")
-                    original = {p.name: p.read_bytes() for p in (root / 'data/keys').iterdir()}
-                    deploy.deploy(self.config)
-                    self.assertEqual(original, {p.name: p.read_bytes() for p in (root / 'data/keys').iterdir()})
-                    with sqlite3.connect(root / 'data/auth.db') as db:
-                        self.assertEqual(db.execute('select name from account').fetchall(), [('preserve-me',)])
-                    self.assertEqual((root / 'etc/config/idp.env').stat().st_mode & 0o777, 0o600)
-                    self.assertEqual((root / 'webroot').stat().st_mode & 0o777, 0o755)
-                    self.assertEqual(len(list((root / 'data/backups').iterdir())), 1)
-                    self.assertTrue(any(c[:2] == ('certbot', 'certonly') and '--webroot' in c for c in commands))
-                    self.assertIn(('systemctl', 'enable', '--now', 'certbot.timer'), commands)
-                    hook = (root / 'etc/letsencrypt/renewal-hooks/deploy/snodec-idp').read_text()
-                    self.assertIn('nginx -t\nsystemctl reload nginx', hook)
-                finally:
-                    os.umask(previous)
+        for mode in ('letsencrypt', 'files', 'proxy'):
+            config = self.config | {'tls': {'mode': mode}}
+            if mode == 'files':
+                config['tls'].update(certificate='/etc/ssl/cert.pem', private_key='/etc/ssl/key.pem')
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                commands = []
+                real_run, real_write = deploy.run, deploy.write
+                def command(*args):
+                    commands.append(args)
+                    result = real_run(*args) if args[0] == 'openssl' else ''
+                    return result
+                def write(path, content, mode=0o600):
+                    target = path if path.is_relative_to(root) else root / str(path).lstrip('/')
+                    real_write(target, content, mode)
+                with patch.object(deploy, 'CONFIG', root / 'etc/config'), patch.object(deploy, 'DATA', root / 'data'), \
+                     patch.object(deploy, 'WEBROOT', root / 'webroot'), patch.object(deploy, 'CERT', root / 'cert'), \
+                     patch.object(deploy, 'SITE', root / 'site.conf'), patch.object(deploy, 'preflight', return_value='certbot.timer' if mode == 'letsencrypt' else None), \
+                     patch.object(deploy, 'run', side_effect=command), patch.object(deploy, 'write', side_effect=write), \
+                     patch.object(deploy.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                     patch.object(deploy.urllib.request, 'urlopen', side_effect=lambda *args, **kwargs: io.BytesIO(b'{"status":"ok"}')):
+                    previous = os.umask(0o077)
+                    try:
+                        deploy.deploy(config)
+                        with closing(sqlite3.connect(root / 'data/auth.db')) as db:
+                            db.execute('create table account (name text)')
+                            db.execute("insert into account values ('preserve-me')")
+                            db.commit()
+                        original = {p.name: p.read_bytes() for p in (root / 'data/keys').iterdir()}
+                        deploy.deploy(config)
+                        self.assertEqual(original, {p.name: p.read_bytes() for p in (root / 'data/keys').iterdir()})
+                        with closing(sqlite3.connect(root / 'data/auth.db')) as db:
+                            self.assertEqual(db.execute('select name from account').fetchall(), [('preserve-me',)])
+                        self.assertEqual((root / 'etc/config/idp.env').stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(len(list((root / 'data/backups').iterdir())), 1)
+                        if mode == 'letsencrypt':
+                            self.assertEqual((root / 'webroot').stat().st_mode & 0o777, 0o755)
+                            self.assertTrue(any(c[:2] == ('certbot', 'certonly') and '--webroot' in c for c in commands))
+                            self.assertIn(('systemctl', 'enable', '--now', 'certbot.timer'), commands)
+                            hook = (root / 'etc/letsencrypt/renewal-hooks/deploy/snodec-idp').read_text()
+                            self.assertIn('nginx -t\nsystemctl reload nginx', hook)
+                        else:
+                            self.assertFalse(any(c[0] == 'certbot' for c in commands))
+                            self.assertEqual(any(c[0] == 'nginx' for c in commands), mode == 'files')
+                    finally:
+                        os.umask(previous)
 
     def test_check_is_read_only_and_does_not_print_secrets(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,6 +172,240 @@ class DeploymentTest(unittest.TestCase):
             self.assertIn('Valid deployment', result.stdout)
             self.assertNotIn('DO-NOT-PRINT', result.stdout + result.stderr)
             self.assertEqual(list(Path(tmp).iterdir()), [path])
+
+    def test_prompts_require_first_input_and_keep_saved_values_without_echoing_secrets(self):
+        prompts = []
+        answers = iter(['', 'idp.example.org', ''])
+        def answer(prompt):
+            prompts.append(prompt)
+            return next(answers)
+        with patch('builtins.input', side_effect=answer), patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(deploy.ask('Host', 'Example only', convert=deploy.hostname), 'idp.example.org')
+            self.assertEqual(deploy.ask('Host', 'Saved host', 'saved.example.org'), 'saved.example.org')
+            with patch.object(deploy.getpass, 'getpass', return_value='') as hidden:
+                self.assertEqual(deploy.ask('Secret', 'Hidden', 'NEVER-ECHO', secret=True), 'NEVER-ECHO')
+                self.assertNotIn('NEVER-ECHO', hidden.call_args.args[0])
+            self.assertNotIn('NEVER-ECHO', output.getvalue())
+        self.assertEqual(prompts[:2], ['Host: ', 'Host: '])
+        self.assertIn('[saved.example.org]', prompts[2])
+
+    def test_first_wizard_has_no_prefilled_deployment_answers(self):
+        answers = iter(['idp.example.org', 'yes', 'app.example.org', 'my-client', 'no', 'no',
+                        '8.8.8.8', 'proxy', 'no', 'disabled'])
+        prompts = []
+        def answer(prompt):
+            prompts.append(prompt)
+            return next(answers)
+        config = {}
+        with patch('builtins.input', side_effect=answer), patch('sys.stdout', new_callable=io.StringIO):
+            deploy.collect_config(config)
+        self.assertTrue(all('[' not in prompt for prompt in prompts), prompts)
+        self.assertEqual(config['hostname'], 'idp.example.org')
+        self.assertEqual(config['tls'], {'mode': 'proxy'})
+        self.assertEqual(config['clients'], {'my-client': ['https://app.example.org/auth/callback']})
+        self.assertEqual(config['google_client_secret'], '')
+        self.assertEqual(config['smtp_command'], '')
+
+    def test_first_wizard_collects_files_google_and_smtp_without_defaults(self):
+        answers = iter(['idp.example.org', 'yes', 'app.example.org', 'my-client', 'no', 'no',
+                        '8.8.8.8', 'files', '/etc/ssl/cert.pem', '/etc/ssl/key.pem', 'yes', 'google-id',
+                        'smtp', 'smtp.example.org', 'implicit', '465', 'sender@example.org', 'mail-user',
+                        'recipient@example.org'])
+        prompts = []
+        def answer(prompt):
+            prompts.append(prompt)
+            return next(answers)
+        config = {}
+        with patch('builtins.input', side_effect=answer), patch.object(deploy.getpass, 'getpass', side_effect=['GOOGLE-SECRET', 'MAIL-SECRET']),              patch('sys.stdout', new_callable=io.StringIO) as output:
+            deploy.collect_config(config)
+        self.assertTrue(all('[' not in prompt for prompt in prompts), prompts)
+        self.assertEqual(config['mail']['port'], 465)
+        self.assertEqual(config['google_client_secret'], 'GOOGLE-SECRET')
+        self.assertEqual(config['mail']['password'], 'MAIL-SECRET')
+        self.assertNotIn('GOOGLE-SECRET', output.getvalue())
+        self.assertNotIn('MAIL-SECRET', output.getvalue())
+
+    def test_saved_wizard_retains_full_callback_list_and_credentials(self):
+        config = self.config | {'tls': {'mode': 'proxy'}, 'public_ips': ['8.8.8.8'],
+                                'google_client_id': 'saved-id', 'google_client_secret': 'HIDDEN'}
+        config['clients']['minimal-mfa-app'].append('https://app.example.org/second/callback')
+        original = json.loads(json.dumps(config))
+        answers = iter(['', '', '', '', 'no', '', '', '', '', '', ''])
+        with patch('builtins.input', side_effect=lambda prompt: next(answers)),              patch.object(deploy.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO) as output:
+            deploy.collect_config(config)
+        self.assertEqual(config, original)
+        self.assertNotIn('HIDDEN', output.getvalue())
+
+    def test_existing_external_application_callbacks_are_defaults(self):
+        config = self.config | {'tls': {'mode': 'proxy'}, 'public_ips': ['8.8.8.8']}
+        config.pop('example')
+        original = json.loads(json.dumps(config))
+        answers = iter(['', '', '', '', 'no', '', '', '', '', ''])
+        with patch('builtins.input', side_effect=lambda prompt: next(answers)), patch('sys.stdout', new_callable=io.StringIO):
+            deploy.collect_config(config)
+        self.assertEqual(config, original)
+
+    def test_alternative_certificate_modes_do_not_require_certbot(self):
+        for mode in ('files', 'proxy'):
+            config = self.config | {'tls': {'mode': mode}, 'accept_acme_terms': False, 'acme_email': ''}
+            if mode == 'files':
+                config['tls'].update(certificate='/etc/ssl/fullchain.pem', private_key='/etc/ssl/private.pem')
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp,                  patch.object(deploy, 'SITE', Path(tmp) / 'absent'), patch.object(deploy, 'DATA', Path(tmp)),                  patch.object(deploy.os, 'geteuid', return_value=0),                  patch.object(deploy.shutil, 'which', side_effect=lambda name: None if name == 'certbot' else '/usr/bin/' + name),                  patch.object(deploy, 'run', return_value='') as command, patch.object(deploy, 'check_certificates') as certificates:
+                self.assertIsNone(deploy.preflight(config))
+                self.assertFalse(any('certbot' in str(call) for call in command.call_args_list))
+                self.assertEqual(certificates.called, mode == 'files')
+                if mode == 'files':
+                    self.assertIn('ssl_certificate /etc/ssl/fullchain.pem;', deploy.nginx_config(config, True))
+
+    def test_dns_rejects_wrong_ipv6_and_nonpublic_input(self):
+        config = self.config | {'public_ips': ['8.8.8.8']}
+        for address, valid in [('8.8.8.8', True), ('2001:4860:4860::8888', False)]:
+            with self.subTest(address=address), patch.object(deploy.socket, 'getaddrinfo', return_value=[(None, None, None, None, (address, 443))]),                  patch('sys.stdout', new_callable=io.StringIO):
+                if valid:
+                    deploy.check_dns(config)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'DNS'):
+                        deploy.check_dns(config)
+        for address in ('127.0.0.1', '::1', '10.0.0.1'):
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                deploy.address_list(address)
+
+    def test_mail_configuration_is_protected_and_has_no_shell_secret(self):
+        mail = {'host': 'smtp.example.org', 'port': 587, 'tls': 'starttls', 'username': 'user',
+                'password': 'secret"with\\slashes', 'from': 'sender@example.org', 'test_to': 'test@example.org'}
+        config = self.config | {'mail': mail, 'smtp_command': ''}
+        deploy.validate(config)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'CONFIG', Path(tmp)), patch.object(deploy.os, 'chown'):
+            command = deploy.provision_mail(config, pwd.getpwuid(os.getuid()))
+            path = Path(tmp) / 'mail/msmtprc'
+            self.assertNotIn(mail['password'], command)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o750)
+            self.assertIn('tls_certcheck "on"', path.read_text())
+            self.assertIn('set_from_header "on"', path.read_text())
+            self.assertIn('allow_from_override "off"', path.read_text())
+            self.assertIn('password "secret\\"with\\\\slashes"', path.read_text())
+        with self.assertRaises(ValueError):
+            deploy.validate(config | {'smtp_command': '/usr/bin/other-mail'})
+
+    def test_real_certificate_validation_rejects_wrong_name_key_and_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key, cert = root / 'key.pem', root / 'cert.pem'
+            deploy.run('openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                       '-keyout', str(key), '-out', str(cert), '-days', '1',
+                       '-subj', '/CN=idp.example.org', '-addext', 'subjectAltName=DNS:idp.example.org')
+            key.chmod(0o600)
+            config = {'hostname': 'idp.example.org', 'clients': {}, 'tls': {
+                'mode': 'files', 'certificate': str(cert), 'private_key': str(key)}}
+            with patch.dict(os.environ, {'SSL_CERT_FILE': str(cert)}):
+                deploy.check_certificates(config)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    deploy.check_certificates(config | {'hostname': 'wrong.example.org'})
+                key.chmod(0o644)
+                with self.assertRaisesRegex(ValueError, 'world-accessible'):
+                    deploy.check_certificates(config)
+                key.chmod(0o600)
+                deploy.run('openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:2048', '-out', str(key))
+                with self.assertRaisesRegex(ValueError, 'do not match'):
+                    deploy.check_certificates(config)
+
+    def test_listener_conflicts_are_not_stopped(self):
+        for line, mode, valid in [
+            ('LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:(("apache2",pid=7,fd=3))', 'files', False),
+            ('LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:(("apache2",pid=7,fd=3))', 'proxy', True),
+            ('LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=7,fd=3))', 'files', True),
+            ('LISTEN 0 128 127.0.0.1:8083 0.0.0.0:* users:(("auth_idp",pid=7,fd=3))', 'proxy', True),
+            ('LISTEN 0 128 0.0.0.0:8083 0.0.0.0:* users:(("auth_idp",pid=7,fd=3))', 'proxy', False),
+            ('LISTEN 0 128 127.0.0.1:8083 0.0.0.0:* users:(("other",pid=9,fd=3))', 'proxy', False),
+        ]:
+            with self.subTest(line=line, mode=mode),                  patch.object(deploy, 'run', side_effect=lambda *args: line if args[0] == 'ss' else '7') as command,                  patch('sys.stdout', new_callable=io.StringIO):
+                if valid:
+                    deploy.check_listeners({'tls': {'mode': mode}})
+                else:
+                    with self.assertRaises(ValueError):
+                        deploy.check_listeners({'tls': {'mode': mode}})
+                self.assertFalse(any('stop' in call.args for call in command.call_args_list))
+
+    def test_failed_and_interrupted_steps_persist_incomplete_report(self):
+        for error in (RuntimeError('test failure'), KeyboardInterrupt()):
+            with self.subTest(error=type(error)), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'report.json'
+                report = {'checks': {}, 'complete': False}
+                with patch.object(deploy, 'retry', side_effect=error), self.assertRaises(type(error)):
+                    deploy.checked_step(report, path, 'Deployment', lambda: None)
+                self.assertFalse(json.loads(path.read_text())['complete'])
+                self.assertEqual(json.loads(path.read_text())['checks']['Deployment'], 'failed or interrupted')
+
+    def test_pending_browser_or_renewal_checks_never_report_complete(self):
+        for status in ('passed', 'pending', 'failed'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'deployment.json'
+                config = self.config | {'tls': {'mode': 'proxy'}}
+                deploy.write(path, json.dumps(config))
+                with patch.object(deploy.os, 'geteuid', return_value=0), patch.object(deploy.sys.stdin, 'isatty', return_value=True),                      patch.object(deploy, 'collect_config'), patch.object(deploy, 'yes', return_value=True),                      patch.object(deploy, 'network_setup'), patch.object(deploy, 'deploy'), patch.object(deploy, 'verify_http'),                      patch.object(deploy, 'choice', return_value=status), patch('sys.stdout', new_callable=io.StringIO):
+                    self.assertEqual(deploy.interactive(path), status == 'passed')
+                report = json.loads(path.with_name('deployment-report.json').read_text())
+                self.assertEqual(report['complete'], status == 'passed')
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(len(list(path.parent.glob('deployment.json.previous-*'))), 1)
+
+    def test_https_redirect_verification_requires_correct_public_destinations(self):
+        def response(url, bad=False):
+            result = io.BytesIO(b'{"status":"ok"}')
+            result.status, result.headers = 200, {}
+            if url.startswith('http:'):
+                result.status = 308
+                result.headers['Location'] = url.replace('http:', 'https:', 1)
+            if url == 'https://core.vchrist.at/':
+                result.status = 303
+                result.headers['Location'] = 'https://wrong.example.org/' if bad else self.config['redirects']['core.vchrist.at']
+            return result
+        for bad in (False, True):
+            with self.subTest(bad=bad), patch.object(deploy.urllib.request, 'build_opener') as opener,                  patch.object(deploy.urllib.request, 'urlopen', side_effect=response):
+                opener.return_value.open.side_effect = lambda url, **kwargs: response(url, bad)
+                # urlopen also supplies the timeout keyword.
+                with patch.object(deploy.urllib.request, 'urlopen', side_effect=lambda url, **kwargs: response(url)):
+                    if bad:
+                        with self.assertRaisesRegex(ValueError, 'redirect failed'):
+                            deploy.verify_http(self.config)
+                    else:
+                        deploy.verify_http(self.config)
+
+    def test_mail_test_uses_service_sandbox_and_requires_receipt(self):
+        config = self.config | {'smtp_command': '/usr/bin/msmtp -t'}
+        with patch.object(deploy.shutil, 'which', return_value='/usr/bin/systemd-run'),              patch.object(deploy, 'ask', return_value='recipient@example.org'),              patch.object(deploy.subprocess, 'run') as command, patch.object(deploy, 'yes', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'not confirmed'):
+                deploy.test_mail(config)
+        args = command.call_args.args[0]
+        self.assertIn('--property=User=snodec-idp', args)
+        self.assertIn('--property=ProtectHome=yes', args)
+        self.assertIn(b'To: recipient@example.org', command.call_args.kwargs['input'])
+
+    def test_firewall_only_changes_confirmed_active_ufw(self):
+        for active in (False, True):
+            commands = []
+            def command(*args):
+                commands.append(args)
+                return 'Status: active' if active else 'Status: inactive'
+            with self.subTest(active=active), patch.object(deploy, 'check_dns'), patch.object(deploy, 'check_listeners'),                  patch.object(deploy, 'choice', return_value='ufw'), patch.object(deploy, 'yes', return_value=True),                  patch.object(deploy, 'run', side_effect=command), patch.object(deploy.shutil, 'which', return_value=None),                  patch('builtins.input', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
+                if active:
+                    deploy.network_setup(self.config)
+                    self.assertEqual(commands, [('ufw', 'status'), ('ufw', 'allow', '80/tcp'), ('ufw', 'allow', '443/tcp')])
+                else:
+                    with self.assertRaisesRegex(ValueError, 'not active'):
+                        deploy.network_setup(self.config)
+                    self.assertEqual(commands, [('ufw', 'status')])
+
+    def test_proxy_site_removal_rolls_back_on_invalid_remaining_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'site.conf'
+            content = deploy.MARKER + 'managed'
+            path.write_text(content)
+            with patch.object(deploy, 'SITE', path), patch.object(deploy, 'run', side_effect=subprocess.CalledProcessError(1, 'nginx')):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    deploy.install_site(None)
+            self.assertEqual(path.read_text(), content)
 
 
 if __name__ == '__main__':
