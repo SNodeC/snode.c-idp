@@ -2,6 +2,8 @@
 # Deploy core.snodec.org from the SNode.C binary package repository.
 # Run ON THE ROOT SERVER, after reviewing this file:
 #   sudo bash deploy-core-snodec-org.sh
+# On Debian Sid, append --suite sid; use --suite forky if Forky is misdetected.
+# This selects the installed release's repository; it does not upgrade the OS.
 # Use an interactive terminal. This script installs packages and, after explicit
 # confirmation, starts the public deployment. It does not build source or run CI.
 # This walkthrough chooses Let's Encrypt explicitly. For certificates from another
@@ -18,7 +20,7 @@ if [[ "$EUID" != 0 || ! -t 0 ]]; then
 fi
 
 # STEP 1 — Wait for signed packages for this server's exact OS and architecture.
-# Check https://github.com/SNodeC/Packages/blob/main/docs/status/snodec-idp.md
+# Check https://github.com/SNodeC/Packages/blob/main/status/snodec-idp.md
 # A green build for a different distribution/architecture is not sufficient.
 # Repository preparation and installation below fail if the target is unavailable;
 # do not substitute a different distribution's packages. No source build is needed.
@@ -28,14 +30,15 @@ cat /etc/os-release
 uname -m
 read -r -p 'Press Enter once the packages for this target are published: ' _
 
-# STEP 2 — Prepare the signed binary repository, without installing all projects.
+# STEP 2 — Prepare the official project-specific binary installer.
 # Bootstrap HTTPS download tools using the OS repositories. Rocky additionally
 # needs CRB/EPEL for the documented dependencies, including Certbot.
-# The shared installer detects the installed OS/release/architecture and configures
-# its signing key and repository. --prepare refreshes indexes only.
+# Download both files into the same directory: snodec-idp.sh delegates OS/release/
+# architecture detection, signing-key setup and package selection to install.sh.
+# Step 3 invokes this installer for just the IDP server and example components.
 # See https://github.com/SNodeC/Packages/blob/main/docs/installation/README.md
 # and https://github.com/SNodeC/Packages/blob/main/keys/README.md for trust/setup.
-printf '%s\n' 'Step 2: Configure the SNode.C binary repository.'
+printf '%s\n' 'Step 2: Download the SNode.C IDP installer.'
 . /etc/os-release
 case "$ID" in
     debian|ubuntu)
@@ -53,20 +56,24 @@ case "$ID" in
 esac
 installer_dir=$(mktemp -d /tmp/snodec-idp-install.XXXXXX)
 trap 'rm -rf -- "$installer_dir"' EXIT
-curl --fail --silent --show-error --location \
-    https://raw.githubusercontent.com/SNodeC/Packages/main/install/install.sh \
-    --output "$installer_dir/install.sh"
-sh "$installer_dir/install.sh" --prepare
+for installer in install.sh snodec-idp.sh; do
+    curl --fail --silent --show-error --location \
+        "https://raw.githubusercontent.com/SNodeC/Packages/main/install/$installer" \
+        --output "$installer_dir/$installer"
+done
 
 # STEP 3 — Install the IDP and styled browser example, plus their dependencies.
-# Inspect the package manager's proposed versions before accepting installation.
+# The project installer configures the signed repository, refreshes its indexes
+# and installs the explicitly selected components and dependencies automatically.
 # Development packages are unnecessary for running these two applications.
 # Installation supplies the IDP services but does not provision or start them;
 # distribution dependency packages such as Nginx may have their own install hooks.
 printf '%s\n' 'Step 3: Install the server and browser example.'
+sh "$installer_dir/snodec-idp.sh" --component server --component example "$@"
+# Confirm both packages and their installed versions before deployment.
 case "$ID" in
-    debian|ubuntu) apt-get install snodec-idp snodec-idp-example ;;
-    rocky|fedora) dnf install snodec-idp snodec-idp-example ;;
+    debian|ubuntu) dpkg-query -W -f='${Package} ${Version} ${Status}\n' snodec-idp snodec-idp-example ;;
+    rocky|fedora) rpm -q snodec-idp snodec-idp-example ;;
 esac
 
 # STEP 4 — Choose distinct IDP and application hostnames in step 8's JSON editor.
