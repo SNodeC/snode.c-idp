@@ -407,6 +407,13 @@ struct TestResponse {
 };
 
 static void tokenAndClientTests() {
+    require(formEncode(Json::object()).empty(), "Empty form must stay empty");
+    require(formEncode(Json{{"a&=", "x+y z"}, {"empty", ""}}) == "a%26%3D=x%2By%20z&empty=", "Form escaping or separators changed");
+    rejects(
+        [] {
+            formEncode(Json{{"invalid", 1}});
+        },
+        "Form value must be a string");
     const auto key = privateKey();
     JwtSigner signer("https://idp.example", key);
     JwtVerifier verifier("https://idp.example", "app", signer.publicKey());

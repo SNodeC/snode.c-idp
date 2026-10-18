@@ -108,7 +108,7 @@ namespace snodec::auth {
         std::string result;
         for (const auto& [name, value] : fields.items()) {
             require(value.is_string(), "Form value must be a string");
-            result += (result.empty() ? "" : "&") + urlEncode(name) + "=" + urlEncode(value.get<std::string>());
+            result.append(result.empty() ? "" : "&").append(urlEncode(name)).append("=").append(urlEncode(value.get<std::string>()));
         }
         return result;
     }

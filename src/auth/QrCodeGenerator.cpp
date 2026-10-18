@@ -98,8 +98,7 @@ namespace snodec {
 
             auto idat = deflateStoredZlib(raw);
 
-            std::vector<uint8_t> png;
-            png.insert(png.end(), {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
+            std::vector<uint8_t> png{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
             auto writeChunk = [&](const char type[4], const std::vector<uint8_t>& data) {
                 uint32_t len = (uint32_t) data.size();
@@ -156,12 +155,9 @@ namespace snodec {
         }
 
         std::vector<uint8_t> QrCodeGenerator::deflateStoredZlib(const std::vector<uint8_t>& data) {
-            std::vector<uint8_t> out;
-            out.reserve(data.size() + 16 + (data.size() / 65535 + 1) * 5);
-
             // zlib header for "no compression/fastest", valid check bits
-            out.push_back(0x78); // CMF
-            out.push_back(0x01); // FLG ( (0x7801 % 31) == 0 )
+            std::vector<uint8_t> out{0x78, 0x01};
+            out.reserve(data.size() + 16 + (data.size() / 65535 + 1) * 5);
 
             size_t pos = 0;
             while (pos < data.size()) {
