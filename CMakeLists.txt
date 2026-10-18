@@ -276,4 +276,14 @@ if(BUILD_TESTING AND NOT AUTH_CLIENT_ONLY)
             "${CMAKE_CURRENT_BINARY_DIR}/encoding-"
     )
     set_tests_properties(png-validation PROPERTIES DEPENDS encoding)
+    add_test(NAME deployment
+             COMMAND "${Python3_EXECUTABLE}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/deployment.py"
+    )
 endif()
+
+option(AUTH_BUILD_EXAMPLE "Build the styled relying-party example" OFF)
+if(AUTH_BUILD_EXAMPLE)
+    add_subdirectory(examples/minimal-mfa-app)
+endif()
+include(Packing)

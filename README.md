@@ -1,3 +1,10 @@
+<a id="banner"></a>
+<p><picture><source media="(max-width: 640px)" srcset="docs/media/nav/banner-documentation-compact.svg"><img src="docs/media/nav/banner-documentation.svg" alt="SNode.C IDP — Identity and MFA" width="100%"></picture></p>
+
+<!-- snodec:begin organization -->
+<p><a href="https://github.com/VolkerChristian#banner" title="Volker Christian account"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/media/nav/account-icon-dark.svg"><source media="(max-width: 640px)" srcset="docs/media/nav/account-icon-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/media/nav/account-dark.svg"><img align="right" src="docs/media/nav/account-light.svg" alt="Volker Christian account" title="Volker Christian account"></picture></a><a href="https://github.com/SNodeC#banner" title="SNode.C organization"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/media/nav/organization-icon-dark.svg"><source media="(max-width: 640px)" srcset="docs/media/nav/organization-icon-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/media/nav/organization-dark.svg"><img align="right" src="docs/media/nav/organization-light.svg" alt="SNode.C organization" title="SNode.C organization"></picture></a><a href="#banner" title="SNode.C IDP repository"><picture><source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/media/nav/repository-icon-dark.svg"><source media="(max-width: 640px)" srcset="docs/media/nav/repository-icon-light.svg"><source media="(prefers-color-scheme: dark)" srcset="docs/media/nav/repository-dark.svg"><img align="right" src="docs/media/nav/repository-light.svg" alt="SNode.C IDP repository" title="SNode.C IDP repository"></picture></a><br clear="all"></p>
+<!-- snodec:end organization -->
+
 # SNode.C Identity Provider
 
 Jan Nicolas Eberwein’s C++ identity provider and client integration for [SNode.C](https://github.com/SNodeC/snode.c), maintained here as a fork of [jan-eberwein/auth](https://github.com/jan-eberwein/auth).
@@ -5,6 +12,11 @@ Jan Nicolas Eberwein’s C++ identity provider and client integration for [SNode
 The project provides an IDP with password login, TOTP, OAuth2 Authorization Code flow with PKCE, RS256 tokens, SQLite persistence, and Google federation, plus a client library for SNode.C applications.
 
 ## Documentation
+
+- [Documentation index](docs/README.md#banner)
+- [Package installation and HTTPS deployment](docs/package-deployment.md#banner)
+- [Styled example application](examples/minimal-mfa-app/README.md#banner)
+- [Packaging integration checklist](docs/package-deployment-plan.md#banner)
 
 Start with the **[step-by-step local deployment walkthrough](docs/local-deployment.md)** to build and run the full IDP and browser application, create accounts, enroll MFA, exercise login/logout and recovery, and back up the deployment.
 
@@ -38,6 +50,10 @@ target_link_libraries(my_application PRIVATE snodec-auth::auth-client)
 ```
 
 Set `AUTH_CLIENT_ONLY=OFF` in a separate build directory to build the IDP too. Building does not configure or start an IDP. Follow the guide for signing keys, persistent storage, issuer/callback configuration, and launch instructions. The repository also includes a Dockerfile and Compose configuration.
+
+## Development
+
+Follow the [repository development conventions](AGENTS.md) for dependency discovery, build locations, formatting and authentication invariants.
 
 ## License
 

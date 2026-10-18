@@ -1,0 +1,11 @@
+{
+  "hostname": "core.snodec.org",
+  "acme_email": "operator@example.org",
+  "accept_acme_terms": false,
+  "clients": {"minimal-mfa-app": ["https://app.example.org/auth/callback"]},
+  "redirects": {"core.vchrist.at": "https://app.example.org/"},
+  "google_client_id": "",
+  "google_client_secret": "",
+  "smtp_command": "",
+  "example": {"hostname": "app.example.org", "client_id": "minimal-mfa-app"}
+}

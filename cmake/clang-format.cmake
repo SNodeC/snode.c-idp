@@ -45,9 +45,15 @@ find_program(CLANG_FORMAT "clang-format")
 
 if(CLANG_FORMAT)
     # Set the source files to clang - format
-    file(GLOB_RECURSE CHECK_CXX_SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/*.[tch]pp
-         ${CMAKE_SOURCE_DIR}/src/*.h ${CMAKE_SOURCE_DIR}/tests/*.[tch]pp
-         ${CMAKE_SOURCE_DIR}/tests/*.h
+    file(
+        GLOB_RECURSE
+        CHECK_CXX_SOURCE_FILES
+        ${CMAKE_SOURCE_DIR}/src/*.[tch]pp
+        ${CMAKE_SOURCE_DIR}/src/*.h
+        ${CMAKE_SOURCE_DIR}/tests/*.[tch]pp
+        ${CMAKE_SOURCE_DIR}/tests/*.h
+        ${CMAKE_SOURCE_DIR}/examples/*.cpp
+        ${CMAKE_SOURCE_DIR}/examples/*.h
     )
 
     # Remove strings matching given regular expression from a list.
