@@ -526,6 +526,59 @@ def password_and_mfa():
     ), "Rejected password-only cookie retained"
 
 
+def reset_return_navigation(browser, root):
+    _, secret = registration("reset-navigation")
+    target = APP + "/private?tab=profile&next=%2Fhome"
+    context = browser.new_context()
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    page.goto(target)
+    page.get_by_role("link", name="Reset password", exact=True).click()
+    assert page.get_by_role("link", name="Back to Sign In", exact=True).get_attribute("href") == target
+    page.locator("[name=email]").fill("reset-navigation@example.test")
+    page.get_by_role("button", name="Send Reset Link", exact=True).click()
+    reset_url = re.search(r"https?://\S+", (root / "mail.txt").read_text())[0]
+    query = parse_qs(urlparse(reset_url).query)
+    assert query["return"] == [target]
+    # The email must work after the originating transaction expires and cookies disappear.
+    with sqlite3.connect(root / "auth.db") as database:
+        database.execute("UPDATE auth_flow SET expires_at=0")
+    page.goto(IDP + "/auth/forgot-password")
+    assert page.get_by_role("link", name="Back to Sign In", exact=True).get_attribute("href") == "/auth/login"
+    context.close()
+    recovery = browser.new_context()
+    page = recovery.new_page()
+    page.set_default_timeout(15000)
+    rejected = requests.get(IDP + "/auth/reset-password?" + urlencode({
+        "token": query["token"][0], "client_id": query["client_id"][0],
+        "return": "https://evil.example/private"}), timeout=15)
+    assert rejected.status_code == 400
+    page.goto(reset_url)
+    password = "Reset-Navigation-Password-123!"
+    page.locator("[name=password]").fill(password)
+    page.locator("[name=password_confirm]").fill("Different-Password-123!")
+    page.get_by_role("button", name="Reset Password", exact=True).click()
+    assert "Passwords do not match" in page.locator("body").inner_text()
+    assert parse_qs(urlparse(page.locator("form").get_attribute("action")).query)["return"] == [target]
+    page.locator("[name=password]").fill(password)
+    page.locator("[name=password_confirm]").fill(password)
+    page.get_by_role("button", name="Reset Password", exact=True).click()
+    link = page.get_by_role("link", name="Sign in to application", exact=True)
+    assert link.get_attribute("href") == target
+    assert not any(c["name"] == "access_token" for c in recovery.cookies(APP))
+    link.click()
+    page.locator("[name=username]").fill("reset-navigation")
+    page.locator("[name=password]").fill(password)
+    page.get_by_role("button", name="Sign in", exact=True).click()
+    page.locator("[name=code]").fill(totp(secret))
+    page.get_by_role("button", name="Verify", exact=True).click()
+    page.wait_for_url(target)
+    assert page.locator("body").inner_text() == "MFA authorized"
+    recovery.close()
+    standalone = requests.get(IDP + "/auth/forgot-password", timeout=15)
+    assert 'href="/auth/login"' in standalone.text
+
+
 def reset_and_security_changes(root):
     session, _ = registration("reset-user", oauth=True)
     credential = token(session)
@@ -553,6 +606,7 @@ def reset_and_security_changes(root):
         ),
     )
     assert response.status_code == 200, "Reset rejected"
+    assert 'href="/auth/login"' in response.text, "Standalone reset lost sign-in destination"
     assert api(APP, credential).status_code == 401
     assert (
         post(
@@ -1007,6 +1061,7 @@ def main():
                     "reset and account-security revocation",
                     lambda: reset_and_security_changes(root),
                 ),
+                ("password reset returns to application", lambda: reset_return_navigation(browser, root)),
                 ("OAuth grants and refresh replay", grants),
                 (
                     "SQLite backup and live password/TOTP restore",

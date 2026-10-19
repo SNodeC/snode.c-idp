@@ -923,7 +923,7 @@ window.onload = () => {
                                "<button type=\"submit\" class=\"btn\">Send Reset Link</button>\n"
                                "</form>\n"
                                "<div class=\"links\"><a href=\"" +
-                               html(navigation.link("/auth/login")) +
+                               html(navigation.target.empty() ? "/auth/login" : navigation.target) +
                                "\">Back to Sign In</a></div>\n"
                                "</div>\n";
             return buildPage(navigation, "Forgot Password", body);
@@ -1649,7 +1649,18 @@ window.onload = () => {
                     }));
 
             // ── GET /auth/forgot-password ─────────────────────────────────────────────
-            app.get("/auth/forgot-password", safe([this](const Navigation& navigation, const auto&, const auto& res) {
+            app.get("/auth/forgot-password", safe([this](Navigation navigation, const auto& req, const auto& res) {
+                        if (navigation.target.empty()) {
+                            Json context = Json::object();
+                            try {
+                                context = store.flow(req->cookie("auth_flow"));
+                            } catch (const std::exception&) {
+                            }
+                            navigation = {context.value("client_id", std::string()), context.value("app_return", std::string())};
+                            if (!navigation.target.empty()) {
+                                store.accountReturn(navigation.clientId, navigation.target);
+                            }
+                        }
                         res->send(forgotPasswordPage(navigation, "", ""));
                     }));
 
@@ -1657,8 +1668,9 @@ window.onload = () => {
                          const auto email = parseBody(req->body)["email"];
                          require(loginLimiter.isAllowed("reset:" + email), "Reset rate limited");
                          loginLimiter.recordFailure("reset:" + email);
-                         store.requestReset(email, [this](const std::string& address, const std::string& token) {
-                             sendPasswordResetLink(address, config.issuer + "/auth/reset-password?token=" + urlEncode(token));
+                         store.requestReset(email, [this, navigation](const std::string& address, const std::string& token) {
+                             sendPasswordResetLink(address,
+                                                   config.issuer + navigation.link("/auth/reset-password?token=" + urlEncode(token)));
                          });
                          res->send(forgotPasswordPage(
                              navigation, "", "If this account exists and delivery is available, a reset email will be sent."));
@@ -1689,22 +1701,24 @@ window.onload = () => {
                     }));
 
             // ── POST /auth/reset-password ─────────────────────────────────────────────
-            app.post(
-                "/auth/reset-password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
-                    auto p = parseBody(req->body);
-                    const std::string token = p["token"], pw = p["password"], pw2 = p["password_confirm"];
-                    if (token.empty() || pw.size() < 8 || pw.size() > 128) {
-                        res->send(resetPasswordPage(navigation, token, "All fields are required."));
-                    } else {
-                        if (pw != pw2) {
-                            res->send(resetPasswordPage(navigation, token, "Passwords do not match."));
-                        } else {
-                            store.resetPassword(token, PasswordHasher::hashPassword(pw));
-                            res->send(successPage(
-                                navigation, "Password Reset", "Your password has been updated successfully.", "/auth/login", "Sign In"));
-                        }
-                    }
-                }));
+            app.post("/auth/reset-password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
+                         auto p = parseBody(req->body);
+                         const std::string token = p["token"], pw = p["password"], pw2 = p["password_confirm"];
+                         if (token.empty() || pw.size() < 8 || pw.size() > 128) {
+                             res->send(resetPasswordPage(navigation, token, "All fields are required."));
+                         } else {
+                             if (pw != pw2) {
+                                 res->send(resetPasswordPage(navigation, token, "Passwords do not match."));
+                             } else {
+                                 store.resetPassword(token, PasswordHasher::hashPassword(pw));
+                                 res->send(successPage(Navigation{},
+                                                       "Password Reset",
+                                                       "Your password has been updated successfully.",
+                                                       navigation.target.empty() ? "/auth/login" : navigation.target,
+                                                       navigation.target.empty() ? "Sign In" : "Sign in to application"));
+                             }
+                         }
+                     }));
 
             // ── GET /auth/help/authenticator ──────────────────────────────────────────
             app.get("/auth/help/authenticator", safe([this](const Navigation& navigation, const auto&, const auto& res) {

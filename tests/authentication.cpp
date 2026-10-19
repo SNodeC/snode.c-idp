@@ -102,13 +102,18 @@ static void storeTests() {
                                 Json{{"redirect_uri", "http://192.168.1.1/auth/callback"}},
                                 Json{{"code_challenge_method", "plain"}},
                                 Json{{"code_challenge", "bad"}},
-                                Json{{"acr_values", "unknown"}}}) {
+                                Json{{"acr_values", "unknown"}},
+                                Json{{"app_return", "https://evil.example/private"}},
+                                Json{{"app_return", "https://app.example:444/private"}}}) {
         auto changed = request;
         changed.update(invalid);
         rejects([&] {
             store.authorization(changed);
         });
     }
+    auto recovery = request;
+    recovery["app_return"] = "https://app.example/private?tab=profile&next=%2Fhome";
+    require(store.authorization(recovery).at("app_return") == recovery.at("app_return"), "Recovery destination lost");
     auto pending = store.begin(context);
     require(store.formFlow(pending, sha256(pending)) == context, "Valid form rejected");
     rejects([&] {
@@ -527,6 +532,7 @@ static void tokenAndClientTests() {
     auto second = client->begin("//evil.example/");
     const auto authorization = form(login.authorizeUrl.substr(login.authorizeUrl.find('?') + 1));
     require(authorization.at("acr_values") == "urn:snodec:acr:mfa", "Client did not request its required MFA assurance");
+    require(authorization.at("app_return") == "https://app.example/private?x=1", "Recovery destination missing from authorization");
     bool called = false;
     client->complete(login.state, second.state, "code", [&](auto token, auto) {
         called = true;
