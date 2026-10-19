@@ -13,6 +13,13 @@ namespace snodec::auth {
         require(endpoint(issuer_).origin == issuer_, "Issuer must be an origin without trailing slash");
     }
 
+    std::string OAuthClient::accountUrl(const std::string& localReturn) const {
+        require(localPath(localReturn), "Account return must be a local application path");
+        const auto target = endpoint(callbackUrl_).origin + localReturn;
+        endpoint(target);
+        return issuer_ + "/settings?" + formEncode({{"client_id", clientId_}, {"return", target}});
+    }
+
     OAuthClient::Login OAuthClient::begin(const std::string& localReturn) {
         std::erase_if(transactions_, [](const auto& item) {
             return item.second.expires <= epochSeconds();

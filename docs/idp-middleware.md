@@ -30,7 +30,6 @@ caller's configuration can be destroyed immediately after construction.
 | `databasePath` | Required SQLite database path; parent directory must exist | `DB_PATH` |
 | `privateKeyPath` | Required existing RSA private PEM path | `IDP_PRIVATE_KEY_PATH` |
 | `totpKeyPath` | Required existing 32-byte binary encryption-key path; preserve it with the database | `TOTP_KEY_PATH` |
-| `protectedAppUrl` | Optional application navigation link; empty hides it | `PROTECTED_WEBAPP_URL` |
 | `smtpCommand` | Optional trusted operator command reading a complete reset message on stdin; empty disables reset delivery | `SMTP_COMMAND` |
 | `googleClientId` | Optional Google OAuth client ID; both Google fields must be nonempty to enable login | `OAUTH_GOOGLE_CLIENT_ID` |
 | `googleClientSecret` | Optional Google OAuth client secret | `OAUTH_GOOGLE_CLIENT_SECRET` |
@@ -58,7 +57,6 @@ config.clients = {{"minimal-mfa-app", {"http://localhost:8081/auth/callback"}}};
 config.databasePath = "/absolute/path/to/data/auth.db";
 config.privateKeyPath = "/absolute/path/to/keys/private_key.pem";
 config.totpKeyPath = "/absolute/path/to/keys/totp.key";
-config.protectedAppUrl = "http://localhost:8081";
 // Optional: configure smtpCommand and both Google credentials here.
 app.use(snodec::auth::IdpMiddleware(std::move(config)));
 ```

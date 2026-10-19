@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 import ssl
 
 
@@ -95,6 +96,11 @@ def main():
         with get(app + '/private') as response:
             assert response.status in (302, 303)
             assert response.headers['Location'].startswith(idp + '/oauth2/authorize?')
+        with get(app + '/account') as response:
+            assert response.status == 303
+            destination = urlparse(response.headers['Location'])
+            assert destination.scheme + '://' + destination.netloc + destination.path == idp + '/settings'
+            assert parse_qs(destination.query) == {'client_id': ['live-app'], 'return': [app + '/private']}
         with get(idp + '/auth/login') as response:
             assert response.status == 200
         for host, destination in [('localhost', idp), ('127.0.0.1', app)]:

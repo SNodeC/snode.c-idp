@@ -17,6 +17,9 @@ int main(int argc, char** argv) {
     snodec::auth::callback::OAuth2CallbackHandler callback(client);
     snodec::auth::AuthMiddleware api(client);
     app.get("/auth/callback", callback);
+    app.get("/account", [client] APPLICATION(req, res) {
+        res->redirect(303, client->accountUrl("/private?section=account&next=%2Fhome"));
+    });
     app.use("/private", browser);
     app.get("/private", [] APPLICATION(req, res) {
         res->send("MFA authorized");

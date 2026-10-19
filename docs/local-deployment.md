@@ -245,7 +245,6 @@ export IDP_BASE_URL=http://localhost:8083
 export IDP_ISSUER=http://localhost:8083
 export HOST_REDIRECTS='{}'
 export IDP_CLIENTS='{"minimal-mfa-app":["http://localhost:8081/auth/callback"]}'
-export PROTECTED_WEBAPP_URL=http://localhost:8081
 export DB_PATH="$DEMO_DIR/data/auth.db"
 export IDP_PRIVATE_KEY_PATH="$DEMO_DIR/keys/private_key.pem"
 export IDP_PUBLIC_KEY_PATH="$DEMO_DIR/keys/public_key.pem"
@@ -266,8 +265,10 @@ The local URLs and OAuth callback paths remain unchanged.
 `DEMO_DIR` must be exported before sourcing this file. The IDP does not load this
 shell file automatically. `IDP_CLIENTS` is the exact allowlist of client IDs and
 callback URLs; no implicit localhost exception exists. `IDP_ISSUER` and
-`IDP_BASE_URL` must agree, with no trailing slash. `PROTECTED_WEBAPP_URL` is a
-navigation destination, not a replacement for callback registration.
+`IDP_BASE_URL` must agree, with no trailing slash. Applications open account
+settings with `OAuthClient::accountUrl(localReturn)`, which supplies their client
+ID and return URL. Account navigation accepts paths on that client's registered
+callback origins; OAuth callbacks still require an exact registered URL.
 
 For actual email, install and configure a mail submission program and replace
 `SMTP_COMMAND` with its fixed command, for example `msmtp -t`. It must read the

@@ -152,7 +152,6 @@ formatting, vendor exclusions, and temporary/persistent build locations.
 | `TOTP_KEY_PATH` | Required existing file containing exactly 32 binary bytes |
 | `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET` | Both must be nonempty to enable Google |
 | `SMTP_COMMAND` | Operator-controlled mail command reading the complete message from stdin, including its `To` header; example `msmtp -t` |
-| `PROTECTED_WEBAPP_URL` | Optional trusted application URL for the account UI navigation link; logout revocation is server-side |
 | `AUTH_REVISION` | CMake/Docker build metadata, not a runtime authentication setting |
 
 There are no automatic private-network/localhost redirect exceptions. Register
@@ -246,7 +245,7 @@ Rules and behavior:
   This feature does not modify the framework's matching semantics.
 
 `HOST_REDIRECTS` is separate from OAuth callback registration (`IDP_CLIENTS`) and
-from the optional navigation link (`PROTECTED_WEBAPP_URL`). Successful OAuth
+account-return navigation. Successful OAuth
 logins still return to their registered callbacks. Redirect destinations should
 be client endpoints that terminate the redirect, not a cycle of redirect hosts.
 
@@ -657,3 +656,45 @@ rejection, many fixed redirects, GET/HEAD/POST behavior, invalid/duplicate/confl
 configuration and the shared container health-probe script against a public IDP
 hostname. Each check reports independently; all fixture processes are stopped.
 Testing the probe natively does not constitute a Docker image startup test.
+
+### Returning from account settings
+
+Applications use `OAuthClient::accountUrl("/private")` to open account settings.
+The helper builds `/settings?client_id=...&return=...` at the IDP, deriving the
+application origin from its configured callback URL. The supplied local path can
+include a query string. The example application's `/account` route uses this
+helper, so **Back to application** leads to `/private`, not its public home page.
+
+This is an application-specific navigation interface, not an OAuth/OIDC parameter
+extension. The IDP accepts only HTTP(S) URLs whose scheme, host and effective port
+match an existing callback registration for the supplied client ID. HTTPS is
+required outside loopback. Paths need no separate registration; OAuth callback
+matching remains exact. The client ID is caller-supplied, not proof of application
+identity: callers can choose any registered client and a matching callback origin. The effective
+navigation allowlist is therefore the set of registered callback origins.
+Unknown clients and destinations that do not match the supplied registration are
+rejected before account mutations. Return URLs are navigation only: no token or code is
+attached when the browser follows the link.
+
+The validated destination travels through IDP links, form actions and redirects,
+including enrollment, profile changes, password changes and reauthentication.
+It is request-local, so authenticated settings tabs from different applications
+keep their own return destinations. Authentication still uses one browser-wide
+pending transaction. Account login, registration, enrollment and federation
+requests carrying a return destination receive HTTP 409 while an application
+OAuth sign-in is pending; they
+neither consume nor replace that transaction. Finish the application sign-in in
+its original tab, then retry account settings. This does not provide concurrent
+independent login transactions. The existing Google authentication transaction
+carries navigation across the external provider round trip. An email password-reset link opened
+independently starts a separate navigation journey. Direct visits to the IDP
+without a return destination show no application-return link.
+
+The destination must not contain credentials, secret tokens or a fragment.
+On returning, the application enforces its normal authentication policy; a revoked
+or expired session starts its usual login flow. The global `PROTECTED_WEBAPP_URL`
+environment variable and `IdpConfig::protectedAppUrl` member have been removed.
+Remove the obsolete variable from existing service environment files when
+upgrading; deployment no longer generates it. Existing client registrations and
+deployment JSON need no new fields. Legacy `/settings?return=...` links without
+a matching `client_id` now return HTTP 400; update those links to use the helper.

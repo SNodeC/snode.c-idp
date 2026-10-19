@@ -68,6 +68,25 @@ static void storeTests() {
     db.initSchema();
     db.initSchema();
     AuthStore store(db, {{"app", Json::array({"https://app.example/callback"})}});
+    for (const auto& target : {"https://app.example/private?x=1&next=%2Fhome", "https://app.example:443/other"}) {
+        require(store.accountReturn("app", target) == target, "Registered client return rejected");
+    }
+    for (const auto& target : {"https://evil.example/private",
+                               "https://app.example.evil/private",
+                               "https://app.example:444/private",
+                               "http://app.example/private",
+                               "//app.example/private",
+                               "javascript:alert(1)",
+                               "https://app.example@evil.example/private",
+                               "https://app.example/\\evil",
+                               "https://app.example/\n"}) {
+        rejects([&] {
+            store.accountReturn("app", target);
+        });
+    }
+    rejects([&] {
+        store.accountReturn("unknown", "https://app.example/private");
+    });
     store.execute("INSERT INTO user(username,email,password_hash,password_salt) VALUES('alice','alice@example.org','hash','')");
     const std::string verifier = randomToken();
     const Json request = {{"response_type", "code"},
@@ -496,6 +515,14 @@ static void tokenAndClientTests() {
     };
     auto client =
         std::make_shared<OAuthClient>("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport);
+    const auto account = client->accountUrl("/private?x=1&next=%2Fhome");
+    const auto navigation = form(account.substr(account.find('?') + 1));
+    require(account.starts_with("https://idp.example/settings?") && navigation.at("client_id") == "app" &&
+                navigation.at("return") == "https://app.example/private?x=1&next=%2Fhome",
+            "Account navigation lost destination");
+    rejects([&] {
+        client->accountUrl("//evil.example/private");
+    });
     auto login = client->begin("/private?x=1");
     auto second = client->begin("//evil.example/");
     const auto authorization = form(login.authorizeUrl.substr(login.authorizeUrl.find('?') + 1));
