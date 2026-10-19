@@ -276,8 +276,8 @@ def provision_mail(config, user):
         if mail['username']:
             values.update(user=mail['username'], password=mail['password'])
         path = directory / 'msmtprc'
-        write(path, 'account default\n' + ''.join(name + ' ' + quote(value) + '\n' for name, value in values.items()), 0o640)
-        os.chown(path, 0, user.pw_gid)
+        write(path, 'account default\n' + ''.join(name + ' ' + quote(value) + '\n' for name, value in values.items()), 0o600)
+        os.chown(path, user.pw_uid, user.pw_gid)
         command = '/usr/bin/msmtp --file=' + str(path) + ' -t'
     else:
         (CONFIG / 'mail/msmtprc').unlink(missing_ok=True)

@@ -281,11 +281,14 @@ python3() {
                 'password': 'secret"with\\slashes', 'from': 'sender@example.org', 'test_to': 'test@example.org'}
         config = self.config | {'mail': mail, 'smtp_command': ''}
         deploy.validate(config)
-        with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'CONFIG', Path(tmp)), patch.object(deploy.os, 'chown'):
-            command = deploy.provision_mail(config, pwd.getpwuid(os.getuid()))
+        with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'CONFIG', Path(tmp)), patch.object(deploy.os, 'chown') as chown:
+            user = pwd.getpwnam('nobody')
+            command = deploy.provision_mail(config, user)
             path = Path(tmp) / 'mail/msmtprc'
             self.assertNotIn(mail['password'], command)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            chown.assert_any_call(path, user.pw_uid, user.pw_gid)
+            chown.assert_any_call(path.parent, 0, user.pw_gid)
             self.assertEqual(path.parent.stat().st_mode & 0o777, 0o750)
             self.assertIn('tls_certcheck "on"', path.read_text())
             self.assertIn('set_from_header "on"', path.read_text())
