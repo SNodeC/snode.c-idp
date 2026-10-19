@@ -38,7 +38,7 @@ installer_directory=$(mktemp -d /tmp/snodec-idp-install.XXXXXX)
 trap 'rm -rf -- "$installer_directory"' EXIT
 # Pin the helper by Git blob ID, independent of branch/tag movement. When deploy.py
 # changes, update this value using: git hash-object scripts/deploy.py
-helper_blob=68c610a49b9c2ca0c52106482a319bee2958d5d7
+helper_blob=429d471a321ebe30646f1002690e7be55d74cb77
 curl --fail --silent --show-error --location --header 'Accept: application/vnd.github.raw+json' \
     "https://api.github.com/repos/SNodeC/snode.c-idp/git/blobs/$helper_blob" \
     --output "$installer_directory/deploy.py"
