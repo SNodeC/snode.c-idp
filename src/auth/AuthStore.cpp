@@ -68,14 +68,24 @@ namespace snodec::auth {
                     challenge.size() == 43 && decodeBase64Url(challenge).size() == 32,
                 "Invalid authorization request");
         Json context = Json::object();
-        for (const auto* key :
-             {"client_id", "redirect_uri", "state", "scope", "nonce", "code_challenge", "code_challenge_method", "acr_values"}) {
+        for (const auto* key : {"client_id",
+                                "redirect_uri",
+                                "state",
+                                "scope",
+                                "nonce",
+                                "code_challenge",
+                                "code_challenge_method",
+                                "acr_values",
+                                "app_return"}) {
             const auto value = input.value(key, std::string());
             require(value.size() <= 2048, "Authorization parameter too long");
             context[key] = value;
         }
         require(context.at("acr_values") == "" || context.at("acr_values") == "urn:snodec:acr:mfa",
                 "Unsupported authentication requirement");
+        if (!context.at("app_return").get<std::string>().empty()) {
+            accountReturn(client, context.at("app_return"));
+        }
         std::istringstream scopes(context.at("scope").get<std::string>());
         std::string scope;
         while (scopes >> scope) {

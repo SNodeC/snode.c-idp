@@ -32,6 +32,7 @@ namespace snodec::auth {
                              formEncode({{"response_type", "code"},
                                          {"client_id", clientId_},
                                          {"redirect_uri", callbackUrl_},
+                                         {"app_return", endpoint(callbackUrl_).origin + transaction.target},
                                          {"scope", "openid profile email"},
                                          {"acr_values", "urn:snodec:acr:mfa"},
                                          {"state", login.state},

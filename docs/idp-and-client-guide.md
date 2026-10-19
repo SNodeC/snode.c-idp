@@ -686,8 +686,23 @@ OAuth sign-in is pending; they
 neither consume nor replace that transaction. Finish the application sign-in in
 its original tab, then retry account settings. This does not provide concurrent
 independent login transactions. The existing Google authentication transaction
-carries navigation across the external provider round trip. An email password-reset link opened
-independently starts a separate navigation journey. Direct visits to the IDP
+carries navigation across the external provider round trip.
+
+For password recovery, `OAuthClient::begin` supplies the optional `app_return`
+authorization parameter using the original application path. This is a SNode.C
+navigation parameter, not an OIDC parameter or an alternative OAuth callback.
+The IDP validates its origin through the same registered-client policy, retains
+it in the existing authorization transaction, and copies it into the recovery
+form and email using `client_id` and `return`. Each recovery request validates
+that destination again. These query values carry navigation only; the single-use
+reset token remains the authority for changing a password. They are not a
+cryptographic binding between the reset token and a particular application.
+
+After reset, "Sign in to application" opens the original application destination
+and starts a fresh OAuth sign-in when required. It does not reuse an expired
+transaction or sign the user in automatically. The email works in a different
+browser without the initiating cookies. Older clients that omit `app_return`
+retain standalone recovery behavior. Direct visits to the IDP
 without a return destination show no application-return link.
 
 The destination must not contain credentials, secret tokens or a fragment.
