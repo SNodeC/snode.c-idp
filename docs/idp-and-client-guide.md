@@ -658,16 +658,24 @@ This is an application-specific navigation interface, not an OAuth/OIDC paramete
 extension. The IDP accepts only HTTP(S) URLs whose scheme, host and effective port
 match an existing callback registration for the supplied client ID. HTTPS is
 required outside loopback. Paths need no separate registration; OAuth callback
-matching remains exact. Applications sharing an origin share that navigation
-trust boundary. Unknown clients and invalid or foreign destinations are rejected
-before account mutations. Return URLs are navigation only: no token or code is
+matching remains exact. The client ID is caller-supplied, not proof of application
+identity: callers can choose any registered client and a matching callback origin. The effective
+navigation allowlist is therefore the set of registered callback origins.
+Unknown clients and destinations that do not match the supplied registration are
+rejected before account mutations. Return URLs are navigation only: no token or code is
 attached when the browser follows the link.
 
 The validated destination travels through IDP links, form actions and redirects,
 including enrollment, profile changes, password changes and reauthentication.
-It is request-local, so settings tabs from different applications keep their own
-return destinations. The existing Google authentication transaction carries it
-across the external provider round trip. An email password-reset link opened
+It is request-local, so authenticated settings tabs from different applications
+keep their own return destinations. Authentication still uses one browser-wide
+pending transaction. Account login, registration, enrollment and federation
+requests carrying a return destination receive HTTP 409 while an application
+OAuth sign-in is pending; they
+neither consume nor replace that transaction. Finish the application sign-in in
+its original tab, then retry account settings. This does not provide concurrent
+independent login transactions. The existing Google authentication transaction
+carries navigation across the external provider round trip. An email password-reset link opened
 independently starts a separate navigation journey. Direct visits to the IDP
 without a return destination show no application-return link.
 
@@ -677,4 +685,5 @@ or expired session starts its usual login flow. The global `PROTECTED_WEBAPP_URL
 environment variable and `IdpConfig::protectedAppUrl` member have been removed.
 Remove the obsolete variable from existing service environment files when
 upgrading; deployment no longer generates it. Existing client registrations and
-deployment JSON need no new fields.
+deployment JSON need no new fields. Legacy `/settings?return=...` links without
+a matching `client_id` now return HTTP 400; update those links to use the helper.

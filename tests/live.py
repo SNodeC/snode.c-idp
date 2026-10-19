@@ -263,6 +263,14 @@ def account_navigation(browser):
     first.locator("[name=code]").fill(totp(secret))
     first.get_by_role("button", name="Activate", exact=True).click()
     assert back.get_attribute("href") == target
+    # Rejecting password reuse must retain the same account-return destination.
+    first.locator("[name=current_password]").fill(PASSWORD)
+    first.locator("[name=new_password]").fill(PASSWORD)
+    first.locator("[name=confirm_password]").fill(PASSWORD)
+    first.get_by_role("button", name="Change Password", exact=True).click()
+    first.wait_for_url(re.compile("msg="))
+    assert "New password must be different" in first.locator("body").inner_text()
+    assert back.get_attribute("href") == target, "Password-reuse rejection lost the return destination"
     # Password changes revoke sessions; reauthentication returns to settings with the link intact.
     first.locator("[name=current_password]").fill(PASSWORD)
     first.locator("[name=new_password]").fill(PASSWORD + "-changed")
@@ -276,6 +284,52 @@ def account_navigation(browser):
     first.wait_for_url(re.compile(re.escape(IDP + "/settings?")))
     assert back.get_attribute("href") == target
     context.close()
+
+
+def account_flow_conflicts():
+    session, secret = registration("navigation-conflict")
+    post(session, "/auth/logout", {})
+    # Tab A has passed password verification and is waiting for its MFA code.
+    login = session.get(APP + "/private", timeout=15)
+    mfa = post(session, "/auth/login", {"transaction": reference(login),
+               "username": "navigation-conflict", "password": PASSWORD})
+    assert mfa.status_code == 200
+    transaction = reference(mfa)
+    original = next(c.value for c in session.cookies if c.name == "auth_flow")
+    target = SECOND + "/private?section=account&next=%2Fhome"
+    query = "?" + urlencode({"client_id": "second-app", "return": target})
+    # Every entry from a stale account tab must preserve A's cookie and pending MFA.
+    for path in ("/settings", "/dashboard", "/settings/delete", "/settings/mfa/disable"):
+        response = session.get(IDP + path + query, allow_redirects=False, timeout=15)
+        assert response.status_code == 302
+        assert next(c.value for c in session.cookies if c.name == "auth_flow") == original, path + " replaced pending OAuth"
+        conflict = session.get(IDP + response.headers["Location"], timeout=15)
+        assert conflict.status_code == 409, path + " reused another application's OAuth transaction"
+        assert "original tab" in conflict.text
+    for path in ("/settings/profile", "/settings/password", "/settings/delete", "/settings/mfa/disable", "/auth/logout"):
+        response = post(session, path + query, {})
+        assert response.status_code == 302
+        assert session.get(IDP + response.headers["Location"], timeout=15).status_code == 409
+    for path in ("/auth/register", "/auth/enroll/totp", "/auth/federated/google"):
+        assert session.get(IDP + path + query, timeout=15).status_code == 409
+    for path in ("/auth/login", "/auth/register", "/auth/mfa", "/auth/enroll/totp/verify", "/auth/enroll/totp/skip"):
+        assert post(session, path + query, {"transaction": transaction, "code": totp(secret)}).status_code == 409
+    assert next(c.value for c in session.cookies if c.name == "auth_flow") == original
+    completed = post(session, "/auth/mfa", {"transaction": transaction, "code": totp(secret)})
+    assert completed.status_code == 302 and completed.headers["Location"].startswith(APP + "/auth/callback?")
+    assert session.get(completed.headers["Location"], timeout=15).text == "MFA authorized"
+    settings = session.get(IDP + "/settings" + query, timeout=15)
+    assert settings.status_code == 200 and 'Back to application' in settings.text
+    assert 'href="' + target.replace('&', '&amp;') + '"' in settings.text
+    # Once A is complete, a new account login from a subpage proceeds normally.
+    post(session, "/auth/logout", {})
+    login = session.get(IDP + "/dashboard" + query, timeout=15)
+    mfa = post(session, "/auth/login" + query, {"transaction": reference(login),
+               "username": "navigation-conflict", "password": PASSWORD})
+    completed = post(session, "/auth/mfa" + query, {"transaction": reference(mfa), "code": totp(secret)})
+    assert completed.status_code == 302
+    assert completed.headers["Location"].startswith("/settings?")
+    assert parse_qs(urlparse(completed.headers["Location"]).query)["return"] == [target]
 
 
 def binding():
@@ -871,6 +925,7 @@ def main():
                 ),
                 ("binding, CSRF and disabled providers", binding),
                 ("account return navigation and tab isolation", lambda: account_navigation(browser)),
+                ("pending OAuth and account navigation conflicts", account_flow_conflicts),
                 ("password and MFA login", password_and_mfa),
                 (
                     "reset and account-security revocation",

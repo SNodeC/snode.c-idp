@@ -1045,12 +1045,26 @@ window.onload = () => {
                         if (!navigation.target.empty()) {
                             owner->store.accountReturn(navigation.clientId, navigation.target);
                         }
-                        if (req->method == "POST" &&
-                            (req->path == "/auth/login" || req->path == "/auth/register" || req->path == "/auth/mfa" ||
-                             req->path == "/auth/enroll/totp/verify" || req->path == "/auth/enroll/totp/skip")) {
-                            owner->store.formFlow(req->cookie("auth_flow"), owner->parseBody(req->body)["transaction"]);
+                        const bool usesFlow = req->path == "/auth/login" || req->path == "/auth/register" || req->path == "/auth/mfa" ||
+                                              req->path.starts_with("/auth/enroll/totp") || req->path.starts_with("/auth/federated/google");
+                        Json pending = Json::object();
+                        if (usesFlow && req->method == "POST") {
+                            pending = owner->store.formFlow(req->cookie("auth_flow"), owner->parseBody(req->body)["transaction"]);
+                        } else if (usesFlow && !navigation.target.empty()) {
+                            try {
+                                pending = owner->store.flow(req->cookie("auth_flow"));
+                            } catch (const std::exception&) {
+                            }
                         }
-                        handler(navigation, req, res);
+                        if (!navigation.target.empty() && !pending.value("client_id", std::string()).empty()) {
+                            res->status(409).send(owner->buildPage(
+                                navigation,
+                                "Sign-in already in progress",
+                                "<div class=\"card\"><h1>Sign-in already in progress</h1>"
+                                "<p>Finish the application sign-in in its original tab, then retry account settings.</p></div>"));
+                        } else {
+                            handler(navigation, req, res);
+                        }
                     } catch (const std::exception&) {
                         if (req->path == "/oauth2/token") {
                             res->status(400).set("Content-Type", "application/json").send(R"({"error":"invalid_grant"})");
@@ -1126,7 +1140,6 @@ window.onload = () => {
             app.get("/settings", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         std::string userId = requireSession(req, res);
                         if (userId.empty()) {
-                            startFlow(req, res, Json::object());
                             res->redirect(navigation.link("/auth/login"));
                         } else {
                             std::string username, email, passwordHash;
@@ -1302,9 +1315,9 @@ window.onload = () => {
                                     // The current password is correct here, so an identical new password
                                     // is just a reuse of the old one — reject it.
                                     if (!federated && newPw == currentPw) {
-                                        res->redirect(
+                                        res->redirect(navigation.link(
                                             "/settings?err=1&msg=" +
-                                            snodec::auth::urlEncode("New password must be different from your current password."));
+                                            snodec::auth::urlEncode("New password must be different from your current password.")));
                                     } else {
                                         std::string err;
                                         if (!db.exec("UPDATE user SET password_hash=?, password_salt='' WHERE id=?",
