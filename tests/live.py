@@ -23,7 +23,7 @@ import threading
 import subprocess
 import time
 import traceback
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -177,6 +177,159 @@ def browser_flow(browser):
     page.wait_for_url(APP + "/private")
     assert page.locator("body").inner_text() == "MFA authorized"
     context.close()
+
+
+def account_navigation(browser):
+    context = browser.new_context()
+    first = context.new_page()
+    first.set_default_timeout(15000)
+    # Registration and enrollment reached from settings retain the application's destination.
+    first.goto(APP + "/account")
+    first.get_by_role("link", name="Register", exact=True).click()
+    for name, value in [("username", "navigation-user"), ("email", "navigation@example.test"),
+                        ("password", PASSWORD), ("confirm_password", PASSWORD)]:
+        first.locator("[name=" + name + "]").fill(value)
+    first.get_by_role("button", name="Register", exact=True).click()
+    secret = next(p.strip() for p in first.locator("p").all_text_contents()
+                  if re.fullmatch("[A-Z2-7]{16,}", p.strip()))
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Activate", exact=True).click()
+    first.wait_for_url(re.compile(re.escape(IDP + "/settings?")))
+    target = APP + "/private?section=account&next=%2Fhome"
+    back = first.get_by_role("link", name="Back to application", exact=True)
+    assert back.get_attribute("href") == target
+    second = context.new_page()
+    second.goto(SECOND + "/account")
+    other_target = SECOND + "/private?section=account&next=%2Fhome"
+    assert second.get_by_role("link", name="Back to application", exact=True).get_attribute("href") == other_target
+    # Forms, feedback redirects and subpage cancellation retain each tab's own destination.
+    first.locator("[name=email]").fill("navigation-updated@example.test")
+    first.get_by_role("button", name="Save Profile", exact=True).click()
+    first.wait_for_url(re.compile("msg="))
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Delete", exact=True).click()
+    first.locator("[name=confirm_username]").fill("wrong-name")
+    first.locator("[name=password]").fill(PASSWORD)
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Delete my account permanently", exact=True).click()
+    assert "username did not match" in first.locator("body").inner_text()
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Cancel", exact=True).click()
+    first.get_by_role("link", name="Disable", exact=True).click()
+    first.get_by_role("link", name="Cancel and Return", exact=True).click()
+    first.get_by_role("link", name="Dashboard", exact=True).click()
+    first.get_by_role("link", name="Settings", exact=True).click()
+    assert back.get_attribute("href") == target
+    first.reload()
+    assert back.get_attribute("href") == target
+    second.get_by_role("link", name="Back to application", exact=True).click()
+    second.wait_for_url(other_target)
+    assert second.locator("body").inner_text() == "MFA authorized"
+    back.click()
+    first.wait_for_url(target)
+    assert first.locator("body").inner_text() == "MFA authorized"
+    first.goto(IDP + "/settings")
+    assert first.get_by_role("link", name="Back to application", exact=True).count() == 0
+    # Reject foreign origins, client swaps and unsafe URL forms before any profile mutation.
+    for client, destination in [("live-app", SECOND + "/private"), ("unknown", target),
+                                ("live-app", "https://evil.example/private"),
+                                ("live-app", "javascript:alert(1)"), ("live-app", "//evil.example")]:
+        response = first.goto(IDP + "/settings?" + urlencode({"client_id": client, "return": destination}))
+        assert response.status == 400
+    first.goto(APP + "/account")
+    response = first.evaluate("""async (target) => {
+        const query = new URLSearchParams({client_id: 'live-app', return: 'https://evil.example/'});
+        const body = new URLSearchParams({username: 'navigation-user', email: 'changed@example.test'});
+        return (await fetch('/settings/profile?' + query, {method: 'POST', body})).status;
+    }""", target)
+    assert response == 400
+    first.reload()
+    assert first.locator("[name=email]").input_value() == "navigation-updated@example.test"
+    # Disabling MFA revokes the session; optional enrollment and skip keep the return journey.
+    first.get_by_role("link", name="Disable", exact=True).click()
+    first.locator("[name=password]").fill(PASSWORD)
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Verify & Disable MFA", exact=True).click()
+    first.locator("[name=username]").fill("navigation-user")
+    first.locator("[name=password]").fill(PASSWORD)
+    first.get_by_role("button", name="Sign in", exact=True).click()
+    first.get_by_role("link", name="Enable", exact=True).click()
+    assert first.get_by_role("button", name="Skip", exact=True).evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)"
+    first.get_by_role("button", name="Skip", exact=True).click()
+    assert back.get_attribute("href") == target
+    first.get_by_role("link", name="Enable", exact=True).click()
+    secret = next(p.strip() for p in first.locator("p").all_text_contents()
+                  if re.fullmatch("[A-Z2-7]{16,}", p.strip()))
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Activate", exact=True).click()
+    assert back.get_attribute("href") == target
+    # Rejecting password reuse must retain the same account-return destination.
+    first.locator("[name=current_password]").fill(PASSWORD)
+    first.locator("[name=new_password]").fill(PASSWORD)
+    first.locator("[name=confirm_password]").fill(PASSWORD)
+    first.get_by_role("button", name="Change Password", exact=True).click()
+    first.wait_for_url(re.compile("msg="))
+    assert "New password must be different" in first.locator("body").inner_text()
+    assert back.get_attribute("href") == target, "Password-reuse rejection lost the return destination"
+    # Password changes revoke sessions; reauthentication returns to settings with the link intact.
+    first.locator("[name=current_password]").fill(PASSWORD)
+    first.locator("[name=new_password]").fill(PASSWORD + "-changed")
+    first.locator("[name=confirm_password]").fill(PASSWORD + "-changed")
+    first.get_by_role("button", name="Change Password", exact=True).click()
+    first.locator("[name=username]").fill("navigation-user")
+    first.locator("[name=password]").fill(PASSWORD + "-changed")
+    first.get_by_role("button", name="Sign in", exact=True).click()
+    first.locator("[name=code]").fill(totp(secret))
+    first.get_by_role("button", name="Verify", exact=True).click()
+    first.wait_for_url(re.compile(re.escape(IDP + "/settings?")))
+    assert back.get_attribute("href") == target
+    context.close()
+
+
+def account_flow_conflicts():
+    session, secret = registration("navigation-conflict")
+    post(session, "/auth/logout", {})
+    # Tab A has passed password verification and is waiting for its MFA code.
+    login = session.get(APP + "/private", timeout=15)
+    mfa = post(session, "/auth/login", {"transaction": reference(login),
+               "username": "navigation-conflict", "password": PASSWORD})
+    assert mfa.status_code == 200
+    transaction = reference(mfa)
+    original = next(c.value for c in session.cookies if c.name == "auth_flow")
+    target = SECOND + "/private?section=account&next=%2Fhome"
+    query = "?" + urlencode({"client_id": "second-app", "return": target})
+    # Every entry from a stale account tab must preserve A's cookie and pending MFA.
+    for path in ("/settings", "/dashboard", "/settings/delete", "/settings/mfa/disable"):
+        response = session.get(IDP + path + query, allow_redirects=False, timeout=15)
+        assert response.status_code == 302
+        assert next(c.value for c in session.cookies if c.name == "auth_flow") == original, path + " replaced pending OAuth"
+        conflict = session.get(IDP + response.headers["Location"], timeout=15)
+        assert conflict.status_code == 409, path + " reused another application's OAuth transaction"
+        assert "original tab" in conflict.text
+    for path in ("/settings/profile", "/settings/password", "/settings/delete", "/settings/mfa/disable", "/auth/logout"):
+        response = post(session, path + query, {})
+        assert response.status_code == 302
+        assert session.get(IDP + response.headers["Location"], timeout=15).status_code == 409
+    for path in ("/auth/register", "/auth/enroll/totp", "/auth/federated/google"):
+        assert session.get(IDP + path + query, timeout=15).status_code == 409
+    for path in ("/auth/login", "/auth/register", "/auth/mfa", "/auth/enroll/totp/verify", "/auth/enroll/totp/skip"):
+        assert post(session, path + query, {"transaction": transaction, "code": totp(secret)}).status_code == 409
+    assert next(c.value for c in session.cookies if c.name == "auth_flow") == original
+    completed = post(session, "/auth/mfa", {"transaction": transaction, "code": totp(secret)})
+    assert completed.status_code == 302 and completed.headers["Location"].startswith(APP + "/auth/callback?")
+    assert session.get(completed.headers["Location"], timeout=15).text == "MFA authorized"
+    settings = session.get(IDP + "/settings" + query, timeout=15)
+    assert settings.status_code == 200 and 'Back to application' in settings.text
+    assert 'href="' + target.replace('&', '&amp;') + '"' in settings.text
+    # Once A is complete, a new account login from a subpage proceeds normally.
+    post(session, "/auth/logout", {})
+    login = session.get(IDP + "/dashboard" + query, timeout=15)
+    mfa = post(session, "/auth/login" + query, {"transaction": reference(login),
+               "username": "navigation-conflict", "password": PASSWORD})
+    completed = post(session, "/auth/mfa" + query, {"transaction": reference(mfa), "code": totp(secret)})
+    assert completed.status_code == 302
+    assert completed.headers["Location"].startswith("/settings?")
+    assert parse_qs(urlparse(completed.headers["Location"]).query)["return"] == [target]
 
 
 def binding():
@@ -771,6 +924,8 @@ def main():
                     lambda: browser_flow(browser),
                 ),
                 ("binding, CSRF and disabled providers", binding),
+                ("account return navigation and tab isolation", lambda: account_navigation(browser)),
+                ("pending OAuth and account navigation conflicts", account_flow_conflicts),
                 ("password and MFA login", password_and_mfa),
                 (
                     "reset and account-security revocation",

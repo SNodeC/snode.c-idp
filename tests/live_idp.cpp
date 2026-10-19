@@ -16,7 +16,6 @@ static express::Router configuredRouter(const nlohmann::json& values) {
     config.databasePath = values.at("databasePath");
     config.privateKeyPath = values.at("privateKeyPath");
     config.totpKeyPath = values.at("totpKeyPath");
-    config.protectedAppUrl = values.at("protectedAppUrl");
     config.smtpCommand = values.at("smtpCommand");
     return snodec::auth::IdpMiddleware(std::move(config));
 }

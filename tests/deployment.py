@@ -145,6 +145,7 @@ python3() {
                         self.assertEqual((root / 'etc/config/idp.env').stat().st_mode & 0o777, 0o600)
                         self.assertEqual(len(list((root / 'data/backups').iterdir())), 1)
                         env = (root / 'etc/config/idp.env').read_text()
+                        self.assertNotIn('PROTECTED_WEBAPP_URL', env)
                         self.assertIn('IDP_BASE_URL="https://core.snodec.org:8088"', env)
                         self.assertIn('IDP_PORT="8088"', env)
                         self.assertIn('APP_PORT="443"', (root / 'etc/config/example.env').read_text())

@@ -92,7 +92,6 @@ def main():
                 databasePath=str(directory / "auth.db"),
                 privateKeyPath=str(directory / "private.pem"),
                 totpKeyPath=str(directory / "totp.key"),
-                protectedAppUrl="http://localhost:8099/app-" + str(index),
                 smtpCommand="cat > " + shlex.quote(str(directory / "mail.eml")),
             )
         )
@@ -107,7 +106,6 @@ def main():
         DB_PATH="/nonexistent/auth.db",
         TOTP_KEY_PATH="/nonexistent/key",
         SMTP_COMMAND="false",
-        PROTECTED_WEBAPP_URL="ENVIRONMENT-MUST-NOT-LEAK",
         OAUTH_GOOGLE_CLIENT_ID="invalid",
         OAUTH_GOOGLE_CLIENT_SECRET="invalid",
         XDG_CONFIG_HOME=str(root / "config"),
@@ -224,11 +222,13 @@ def main():
                 == 400
             )
             sessions.append(register(origin, "Password-for-instance-" + str(index)))
-            page = sessions[-1].get(origin + "/settings", timeout=5).text
-            assert (
-                entry["protectedAppUrl"] in page
-                and "ENVIRONMENT-MUST-NOT-LEAK" not in page
-            )
+            target = "http://localhost:8099/app-" + str(index)
+            parameters = {"client_id": "client-" + str(index), "return": target}
+            page = sessions[-1].get(origin + "/settings", params=parameters, timeout=5)
+            assert page.status_code == 200 and target in page.text
+            parameters["client_id"] = "client-" + str(1 - index)
+            assert sessions[-1].get(origin + "/settings", params=parameters, timeout=5).status_code == 400
+            assert "Back to application" not in sessions[-1].get(origin + "/settings", timeout=5).text
         assert keys[0] != keys[1]
         results.append(
             "temporary middleware/configuration lifetime; independent issuer, keys, databases, clients, navigation and provider configuration"

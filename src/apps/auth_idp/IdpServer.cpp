@@ -31,7 +31,6 @@ int main(int argc, char* argv[]) {
     config.databasePath = env("DB_PATH", "snodec_auth.db");
     config.privateKeyPath = env("IDP_PRIVATE_KEY_PATH", "src/apps/auth_idp/keys/private_key.pem");
     config.totpKeyPath = env("TOTP_KEY_PATH", "");
-    config.protectedAppUrl = env("PROTECTED_WEBAPP_URL", "");
     config.smtpCommand = env("SMTP_COMMAND", "");
     config.googleClientId = env("OAUTH_GOOGLE_CLIENT_ID", "");
     config.googleClientSecret = env("OAUTH_GOOGLE_CLIENT_SECRET", "");

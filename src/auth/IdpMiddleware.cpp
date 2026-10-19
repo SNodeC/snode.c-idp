@@ -286,8 +286,8 @@ label:has(input[type="checkbox"]), .checkbox-group { display: flex; align-items:
     border: 1px solid transparent; border-radius: 8px; text-align: center; font-size: .925rem; font-weight: 650; cursor: pointer; text-decoration: none;
 }
 .btn:hover, .card form button:hover { background: var(--btn-hover); }
-.btn-secondary, .card form[action$="/skip"] button { background: transparent; color: var(--text-color); border-color: var(--input-border); }
-.btn-secondary:hover, .card form[action$="/skip"] button:hover { background: var(--bg-color); }
+.btn-secondary, .card form[action^="/auth/enroll/totp/skip"] button { background: transparent; color: var(--text-color); border-color: var(--input-border); }
+.btn-secondary:hover, .card form[action^="/auth/enroll/totp/skip"] button:hover { background: var(--bg-color); }
 .btn-red, .card form .btn-red, .logout-btn { background: #b52e30; color: #fff; }
 .btn-red:hover, .card form .btn-red:hover, .logout-btn:hover { background: #962428; }
 .error-box, .info-box, .success-box { padding: 16px; border-radius: 10px; margin-bottom: 24px; font-size: .9rem; line-height: 1.5; display: flex; align-items: center; gap: 12px; }
@@ -372,7 +372,17 @@ window.onload = () => {
             return email.empty() ? username : (username.empty() || isPlaceholder) ? email : username + " (" + email + ")";
         }
 
-        std::string buildPage(const std::string& raw_title,
+        struct Navigation {
+            std::string clientId, target;
+            std::string link(const std::string& path) const {
+                return target.empty() ? path
+                                      : path + (path.find('?') == std::string::npos ? "?" : "&") +
+                                            formEncode({{"client_id", clientId}, {"return", target}});
+            }
+        };
+
+        std::string buildPage(const Navigation& navigation,
+                              const std::string& raw_title,
                               const std::string& body,
                               bool isAuthenticated = false,
                               const std::string& raw_username = "") {
@@ -387,25 +397,28 @@ window.onload = () => {
 
             std::string accountBtn = "";
             if (isAuthenticated && !username.empty()) {
-                accountBtn = "<a href=\"/settings\" class=\"desktop-user\" style=\"background:var(--btn-bg);color:#fff;padding:6px "
+                accountBtn = "<a href=\"" + html(navigation.link("/settings")) +
+                             "\" class=\"desktop-user\" style=\"background:var(--btn-bg);color:#fff;padding:6px "
                              "14px;border-radius:20px;font-weight:600;align-items:center;gap:6px;text-decoration:none;\">"
                              "<svg width=\"16\" height=\"16\" fill=\"currentColor\"><use href=\"#icon-user\"/></svg>" +
                              username + "</a>";
             }
 
-            const auto& webAppUrl = config.protectedAppUrl;
+            const auto& webAppUrl = navigation.target;
             std::string protectedAppStr = "";
             if (!webAppUrl.empty()) {
                 protectedAppStr = "<a href=\"" + html(webAppUrl) + "\" style=\"color:#3b82f6; font-weight:600;\">Back to application</a>";
             }
 
-            std::string navLinks = isAuthenticated ? accountBtn +
-                                                         "<a href=\"/dashboard\">Dashboard</a>"
-                                                         "<a href=\"/settings\">Settings</a>" +
-                                                         protectedAppStr +
-                                                         "<form method=\"POST\" action=\"/auth/logout\" style=\"display:inline;margin:0;\">"
+            std::string navLinks = isAuthenticated ? accountBtn + "<a href=\"" + html(navigation.link("/dashboard")) +
+                                                         "\">Dashboard</a>"
+                                                         "<a href=\"" +
+                                                         html(navigation.link("/settings")) + "\">Settings</a>" + protectedAppStr +
+                                                         "<form method=\"POST\" action=\"" + html(navigation.link("/auth/logout")) +
+                                                         "\" style=\"display:inline;margin:0;\">"
                                                          "<button type=\"submit\" class=\"logout-btn\">Sign Out</button></form>"
-                                                   : "<a href=\"/auth/login\">Sign In</a><a href=\"/auth/register\">Create Account</a>";
+                                                   : "<a href=\"" + html(navigation.link("/auth/login")) + "\">Sign In</a><a href=\"" +
+                                                         html(navigation.link("/auth/register")) + "\">Create Account</a>";
 
             return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
                    "<meta charset=\"UTF-8\">\n"
@@ -424,7 +437,9 @@ window.onload = () => {
                    "<header>\n"
                    "<div class=\"header-top\">\n"
                    "  <div style=\"display:flex; flex-direction:column; gap:4px;\">\n"
-                   "    <a href=\"/\" class=\"header-logo\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" "
+                   "    <a href=\"" +
+                   html(navigation.link("/")) +
+                   "\" class=\"header-logo\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" "
                    "fill=\"var(--btn-bg)\"><path d=\"M12 "
                    "2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\"/></svg> SNode.C <span style=\"font-weight:400; "
                    "opacity:0.7;\">Identity Provider</span></a>\n" +
@@ -463,24 +478,30 @@ window.onload = () => {
         // HTML page builders — each is a pure function, no side-effects
         // ============================================================================
 
-        std::string loginPage(const std::string& transaction, const std::string& error = "") {
+        std::string loginPage(const Navigation& navigation, const std::string& transaction, const std::string& error = "") {
             return buildPage(
+                navigation,
                 "Sign in",
                 "<div class=\"card\"><h1>Sign in</h1><p class=\"form-error\" role=\"alert\">" + html(error) +
-                    "</p><form method=\"post\" action=\"/auth/login\">" + "<input type=\"hidden\" name=\"transaction\" value=\"" +
-                    html(transaction) +
+                    "</p><form method=\"post\" action=\"" + html(navigation.link("/auth/login")) + "\">" +
+                    "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                     "\"><label>Username<input name=\"username\" required></label>"
                     "<label>Password<input type=\"password\" name=\"password\" required></label><button>Sign in</button></form>"
-                    "<a href=\"/auth/register\">Register</a> · <a href=\"/auth/forgot-password\">Reset password</a>"
-                    "<p><a href=\"/auth/federated/google\">Sign in with Google</a></p></div>");
+                    "<a href=\"" +
+                    html(navigation.link("/auth/register")) + "\">Register</a> · <a href=\"" +
+                    html(navigation.link("/auth/forgot-password")) +
+                    "\">Reset password</a>"
+                    "<p><a href=\"" +
+                    html(navigation.link("/auth/federated/google")) + "\">Sign in with Google</a></p></div>");
         }
 
-        std::string registerPage(const std::string& transaction, const std::string& error = "") {
+        std::string registerPage(const Navigation& navigation, const std::string& transaction, const std::string& error = "") {
             return buildPage(
+                navigation,
                 "Register",
                 "<div class=\"card\"><h1>Register</h1><p class=\"form-error\" role=\"alert\">" + html(error) +
-                    "</p><form method=\"post\" action=\"/auth/register\">" + "<input type=\"hidden\" name=\"transaction\" value=\"" +
-                    html(transaction) +
+                    "</p><form method=\"post\" action=\"" + html(navigation.link("/auth/register")) + "\">" +
+                    "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                     "\"><label>Username<input name=\"username\" required></label>"
                     "<label>Email<input type=\"email\" name=\"email\" required></label>"
                     "<label>Password<input type=\"password\" name=\"password\" required></label>"
@@ -489,42 +510,51 @@ window.onload = () => {
                     "<button>Register</button></form></div>");
         }
 
-        std::string mfaPage(const std::string& transaction, const std::string& error = "") {
-            return buildPage("Two-factor authentication",
+        std::string mfaPage(const Navigation& navigation, const std::string& transaction, const std::string& error = "") {
+            return buildPage(navigation,
+                             "Two-factor authentication",
                              "<div class=\"card\"><h1>Authenticator code</h1><p class=\"form-error\" role=\"alert\">" + html(error) +
-                                 "</p><form method=\"post\" action=\"/auth/mfa\">" +
+                                 "</p><form method=\"post\" action=\"" + html(navigation.link("/auth/mfa")) + "\">" +
                                  "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                                  "\"><input name=\"code\" aria-label=\"Authenticator code\" inputmode=\"numeric\" "
                                  "autocomplete=\"one-time-code\" pattern=\"[0-9]{6}\" required>"
                                  "<button>Verify</button></form></div>");
         }
 
-        std::string enrollTotpPage(const std::string& secret, const std::string& uri, const std::string& transaction) {
-            return buildPage("Enable two-factor authentication",
+        std::string
+        enrollTotpPage(const Navigation& navigation, const std::string& secret, const std::string& uri, const std::string& transaction) {
+            return buildPage(navigation,
+                             "Enable two-factor authentication",
                              "<div class=\"card\"><h1>Set up your authenticator</h1>"
                              "<img alt=\"Authenticator QR code\" src=\"" +
-                                 QrCodeGenerator::generateDataUri(uri) + "\"><p>" + html(secret) +
-                                 "</p><form method=\"post\" action=\"/auth/enroll/totp/verify\">" +
+                                 QrCodeGenerator::generateDataUri(uri) + "\"><p>" + html(secret) + "</p><form method=\"post\" action=\"" +
+                                 html(navigation.link("/auth/enroll/totp/verify")) + "\">" +
                                  "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                                  "\"><input name=\"code\" aria-label=\"Authenticator code\" inputmode=\"numeric\" "
                                  "autocomplete=\"one-time-code\" pattern=\"[0-9]{6}\" required>"
-                                 "<button>Activate</button></form><form method=\"post\" action=\"/auth/enroll/totp/skip\">" +
+                                 "<button>Activate</button></form><form method=\"post\" action=\"" +
+                                 html(navigation.link("/auth/enroll/totp/skip")) + "\">" +
                                  "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                                  "\"><button>Skip</button></form></div>");
         }
 
-        std::string landingPage() {
+        std::string landingPage(const Navigation& navigation) {
             std::string body = "<div class=\"card\" style=\"text-align:center;\">\n"
                                "<svg class=\"logo-icon\"><use href=\"#icon-rocket\"/></svg>\n"
                                "<h1>SNode.C</h1>\n"
                                "<p class=\"subtitle\">Identity Provider</p>\n"
-                               "<a href=\"/auth/login\" class=\"btn\" style=\"margin-bottom:12px;\">Sign In</a>\n"
-                               "<a href=\"/auth/register\" class=\"btn btn-secondary\">Create Account</a>\n"
+                               "<a href=\"" +
+                               html(navigation.link("/auth/login")) +
+                               "\" class=\"btn\" style=\"margin-bottom:12px;\">Sign In</a>\n"
+                               "<a href=\"" +
+                               html(navigation.link("/auth/register")) +
+                               "\" class=\"btn btn-secondary\">Create Account</a>\n"
                                "</div>\n";
-            return buildPage("Welcome", body, false);
+            return buildPage(navigation, "Welcome", body, false);
         }
 
-        std::string dashboardPage(const std::string& raw_username,
+        std::string dashboardPage(const Navigation& navigation,
+                                  const std::string& raw_username,
                                   int users,
                                   int sessions,
                                   int pendingTokens,
@@ -547,7 +577,9 @@ window.onload = () => {
                            "</svg>"
                            "<div><strong>Multi-Factor Authentication (MFA) is not active.</strong> "
                            "Your account is currently secured with a single factor. To add a second factor, please "
-                           "<a href=\"/settings\" style=\"color:#fb923c; text-decoration:underline; font-weight:600;\">configure MFA in "
+                           "<a href=\"" +
+                           html(navigation.link("/settings")) +
+                           "\" style=\"color:#fb923c; text-decoration:underline; font-weight:600;\">configure MFA in "
                            "your Account Settings</a>.</div>"
                            "</div>";
             }
@@ -610,7 +642,9 @@ window.onload = () => {
                 "      <span style=\"color:#28a745;\">● Secured</span>"
                 "    </div>"
                 "  </div>\n"
-                "  <a href=\"/settings\" class=\"stat-card clickable-card span-2\" style=\"text-decoration:none; display:flex; "
+                "  <a href=\"" +
+                html(navigation.link("/settings")) +
+                "\" class=\"stat-card clickable-card span-2\" style=\"text-decoration:none; display:flex; "
                 "flex-direction:row; "
                 "justify-content:space-between; align-items:center;\">\n"
                 "    <div style=\"display:flex; flex-direction:column;\">\n"
@@ -626,38 +660,22 @@ window.onload = () => {
                 "    </div>\n"
                 "  </a>\n"
                 "</div>\n";
-            return buildPage("Dashboard", body, true, raw_username);
+            return buildPage(navigation, "Dashboard", body, true, raw_username);
         }
 
-        std::string settingsPage(const std::string& raw_username,
+        std::string settingsPage(const Navigation& navigation,
+                                 const std::string& raw_username,
                                  const std::string& raw_email,
                                  bool mfaEnabled,
-                                 const std::string& raw_userId,
                                  bool isFederated,
                                  const std::string& raw_message = "",
-                                 bool isError = false,
-                                 const std::string& returnUri = "") {
+                                 bool isError = false) {
             const auto username = html(raw_username);
             const auto email = html(raw_email);
-            const auto userId = html(raw_userId);
             const auto message = html(raw_message);
 
-            // Optional "back to the application" target, validated as an http(s) URL
-            // with no characters that could break out of an href (this prevents both
-            // attribute injection and non-web redirect schemes). Computed first so the
-            // MFA enrolment link and the Cancel buttons can all carry it.
-            std::string safeReturn;
-            if (localPath(returnUri)) {
-                safeReturn = html(returnUri);
-            }
-            const std::string returnQ = safeReturn.empty() ? std::string("") : "&return=" + snodec::auth::urlEncode(safeReturn);
-            const std::string settingsBase =
-                safeReturn.empty() ? std::string("/settings") : "/settings?return=" + snodec::auth::urlEncode(safeReturn);
-            const std::string cancelBtn = "<a href=\"" + settingsBase + "\" class=\"btn btn-secondary\" style=\"flex:1;\">Cancel</a>";
-            std::string backLink;
-            if (!safeReturn.empty()) {
-                backLink = "<div class=\"links\"><a href=\"" + safeReturn + "\">&larr; Back to the application</a></div>\n";
-            }
+            const std::string cancelBtn =
+                "<a href=\"" + html(navigation.link("/settings")) + "\" class=\"btn btn-secondary\" style=\"flex:1;\">Cancel</a>";
 
             std::string mfaStatus =
                 mfaEnabled
@@ -670,9 +688,11 @@ window.onload = () => {
                       "      <div style=\"font-size:0.85rem; color:var(--text-muted);\">Account is secured</div>"
                       "    </div>"
                       "  </div>"
-                      "  <a href=\"/settings/mfa/disable\" class=\"btn btn-red\" style=\"width:auto; padding:6px 14px; "
-                      "font-size:0.85rem;\">Disable</a>"
-                      "</div>"
+                      "  <a href=\"" +
+                          html(navigation.link("/settings/mfa/disable")) +
+                          "\" class=\"btn btn-red\" style=\"width:auto; padding:6px 14px; "
+                          "font-size:0.85rem;\">Disable</a>"
+                          "</div>"
                     : "<div style=\"display:flex; align-items:center; justify-content:space-between; padding:16px; "
                       "background:rgba(255,59,48,0.05); border:1px solid rgba(255,59,48,0.2); border-radius:12px; margin-top:12px;\">"
                       "  <div style=\"display:flex; align-items:center; gap:10px;\">"
@@ -682,8 +702,8 @@ window.onload = () => {
                       "      <div style=\"font-size:0.85rem; color:var(--text-muted);\">Action recommended</div>"
                       "    </div>"
                       "  </div>"
-                      "  <a href=\"/auth/enroll/totp?user_id=" +
-                          userId + returnQ +
+                      "  <a href=\"" +
+                          html(navigation.link("/auth/enroll/totp")) +
                           "\" class=\"btn\" style=\"width:auto; padding:6px 14px; font-size:0.85rem;\">Enable</a>"
                           "</div>";
 
@@ -704,7 +724,9 @@ window.onload = () => {
                 passwordSection =
                     "<div class=\"divider\"></div>\n"
                     "<h3 style=\"font-size:1.1rem; font-weight:600;\">Change Password</h3>\n"
-                    "<form method=\"POST\" action=\"/settings/password\">\n"
+                    "<form method=\"POST\" action=\"" +
+                    html(navigation.link("/settings/password")) +
+                    "\">\n"
                     "<div class=\"form-group\"><label>Current password</label><input type=\"password\" name=\"current_password\" "
                     "placeholder=\"Current password\" required></div>\n"
                     "<div class=\"form-group\"><label>New password</label><input type=\"password\" name=\"new_password\" placeholder=\"New "
@@ -725,7 +747,8 @@ window.onload = () => {
                 "<p class=\"subtitle\">Manage your profile and security</p>\n" +
                 msgBox +
                 // Editable profile (username + email)
-                "<form method=\"POST\" action=\"/settings/profile\">\n"
+                "<form method=\"POST\" action=\"" + html(navigation.link("/settings/profile")) +
+                "\">\n"
                 "<div class=\"form-group\"><label>Username</label><input type=\"text\" name=\"username\" value=\"" +
                 username +
                 "\" minlength=\"3\" maxlength=\"64\" required></div>\n"
@@ -749,12 +772,14 @@ window.onload = () => {
                 "<div><div style=\"font-weight:600; color:var(--text-color);\">Delete account</div>"
                 "<div style=\"font-size:0.85rem; color:var(--text-muted);\">Permanently remove this account, its sessions and "
                 "MFA</div></div>"
-                "<a href=\"/settings/delete\" class=\"btn btn-red\" style=\"width:auto; padding:6px 14px; font-size:0.85rem;\">Delete</a>"
+                "<a href=\"" +
+                html(navigation.link("/settings/delete")) +
+                "\" class=\"btn btn-red\" style=\"width:auto; padding:6px 14px; font-size:0.85rem;\">Delete</a>"
                 "</div>\n" +
-                backLink + "</div>\n";
+                "</div>\n";
 
             std::string headerName = formatUserDisplayName(username, email);
-            return buildPage("Settings", body, true, headerName);
+            return buildPage(navigation, "Settings", body, true, headerName);
         }
 
         // Detects accounts that have no local password (created via a federated
@@ -763,7 +788,8 @@ window.onload = () => {
             return passwordHash.rfind("$federated$", 0) == 0;
         }
 
-        std::string deleteAccountConfirmPage(const std::string& raw_username,
+        std::string deleteAccountConfirmPage(const Navigation& navigation,
+                                             const std::string& raw_username,
                                              const std::string& raw_email,
                                              const std::string& raw_message = "",
                                              bool isError = false,
@@ -801,8 +827,8 @@ window.onload = () => {
                                "<h1>Delete Account</h1>\n"
                                "<p class=\"subtitle\">This permanently removes your account, its sessions and any MFA enrolment. This "
                                "cannot be undone.</p>\n" +
-                               msgBox +
-                               "<form method=\"POST\" action=\"/settings/delete\">\n"
+                               msgBox + "<form method=\"POST\" action=\"" + html(navigation.link("/settings/delete")) +
+                               "\">\n"
                                "<div class=\"form-group\"><label>Type your username <b>" +
                                username +
                                "</b> to confirm</label>"
@@ -810,13 +836,16 @@ window.onload = () => {
                                username + "\" autocomplete=\"off\" autocapitalize=\"off\" required></div>\n" + pwField + codeField +
                                "<button type=\"submit\" class=\"btn btn-red\">Delete my account permanently</button>\n"
                                "</form>\n"
-                               "<div class=\"links\"><a href=\"/settings\">Cancel</a></div>\n"
+                               "<div class=\"links\"><a href=\"" +
+                               html(navigation.link("/settings")) +
+                               "\">Cancel</a></div>\n"
                                "</div>\n";
             std::string headerName = formatUserDisplayName(username, email);
-            return buildPage("Delete Account", body, true, headerName);
+            return buildPage(navigation, "Delete Account", body, true, headerName);
         }
 
-        std::string mfaDisableConfirmPage(const std::string& raw_error,
+        std::string mfaDisableConfirmPage(const Navigation& navigation,
+                                          const std::string& raw_error,
                                           const std::string& raw_username,
                                           const std::string& raw_email,
                                           bool isFederated = false) {
@@ -846,7 +875,8 @@ window.onload = () => {
                 "href=\"#icon-shield\"/></svg>\n"
                 "<h1 style=\"text-align:center;\">Disable MFA</h1>\n"
                 "<p class=\"subtitle\" style=\"text-align:center;\">" +
-                subtitle + "</p>\n" + err + "<form method=\"POST\" action=\"/settings/mfa/disable\">\n" + pwField +
+                subtitle + "</p>\n" + err + "<form method=\"POST\" action=\"" + html(navigation.link("/settings/mfa/disable")) + "\">\n" +
+                pwField +
                 "<div class=\"form-group\">\n"
                 "<label>Verification Code</label>\n"
                 "<input type=\"text\" name=\"code\" placeholder=\"000000\" maxlength=\"6\" "
@@ -858,14 +888,16 @@ window.onload = () => {
                 "<button type=\"submit\" class=\"btn btn-red\" style=\"width:100%; margin-top:16px;\">Verify & Disable MFA</button>\n"
                 "</form>\n"
                 "<div class=\"links\" style=\"text-align:center; margin-top:16px;\">\n"
-                "<a href=\"/settings\">Cancel and Return</a>\n"
+                "<a href=\"" +
+                html(navigation.link("/settings")) +
+                "\">Cancel and Return</a>\n"
                 "</div>\n"
                 "</div>\n";
             std::string headerName = formatUserDisplayName(username, email);
-            return buildPage("Disable MFA", body, true, headerName);
+            return buildPage(navigation, "Disable MFA", body, true, headerName);
         }
 
-        std::string forgotPasswordPage(const std::string& raw_error, const std::string& raw_info) {
+        std::string forgotPasswordPage(const Navigation& navigation, const std::string& raw_error, const std::string& raw_info) {
             const auto error = html(raw_error);
             const auto info = html(raw_info);
 
@@ -876,20 +908,22 @@ window.onload = () => {
                                "<div class=\"logo\">🔑</div>\n"
                                "<h1>Forgot Password</h1>\n"
                                "<p class=\"subtitle\">Enter your email to receive a reset link</p>\n" +
-                               msg +
-                               "<form method=\"POST\" action=\"/auth/forgot-password\">\n"
+                               msg + "<form method=\"POST\" action=\"" + html(navigation.link("/auth/forgot-password")) +
+                               "\">\n"
                                "<div class=\"form-group\">\n"
                                "<label>Email Address</label>\n"
                                "<input type=\"email\" name=\"email\" placeholder=\"your@email.com\" required autofocus>\n"
                                "</div>\n"
                                "<button type=\"submit\" class=\"btn\">Send Reset Link</button>\n"
                                "</form>\n"
-                               "<div class=\"links\"><a href=\"/auth/login\">Back to Sign In</a></div>\n"
+                               "<div class=\"links\"><a href=\"" +
+                               html(navigation.link("/auth/login")) +
+                               "\">Back to Sign In</a></div>\n"
                                "</div>\n";
-            return buildPage("Forgot Password", body);
+            return buildPage(navigation, "Forgot Password", body);
         }
 
-        std::string resetPasswordPage(const std::string& raw_token, const std::string& raw_error) {
+        std::string resetPasswordPage(const Navigation& navigation, const std::string& raw_token, const std::string& raw_error) {
             const auto token = html(raw_token);
             const auto error = html(raw_error);
 
@@ -899,8 +933,8 @@ window.onload = () => {
                                "<div class=\"logo\">🔐</div>\n"
                                "<h1>Reset Password</h1>\n"
                                "<p class=\"subtitle\">Choose a new password for your account</p>\n" +
-                               err +
-                               "<form method=\"POST\" action=\"/auth/reset-password\">\n"
+                               err + "<form method=\"POST\" action=\"" + html(navigation.link("/auth/reset-password")) +
+                               "\">\n"
                                "<input type=\"hidden\" name=\"token\" value=\"" +
                                token +
                                "\">\n"
@@ -915,16 +949,17 @@ window.onload = () => {
                                "<button type=\"submit\" class=\"btn btn-green\">Reset Password</button>\n"
                                "</form>\n"
                                "</div>\n";
-            return buildPage("Reset Password", body);
+            return buildPage(navigation, "Reset Password", body);
         }
 
-        std::string successPage(const std::string& raw_heading,
+        std::string successPage(const Navigation& navigation,
+                                const std::string& raw_heading,
                                 const std::string& raw_message,
                                 const std::string& raw_linkUrl,
                                 const std::string& raw_linkText) {
             const auto heading = html(raw_heading);
             const auto message = html(raw_message);
-            const auto linkUrl = html(raw_linkUrl);
+            const auto linkUrl = html(navigation.link(raw_linkUrl));
             const auto linkText = html(raw_linkText);
 
             std::string body = "<div class=\"card\">\n"
@@ -940,10 +975,10 @@ window.onload = () => {
                                linkUrl + "\" class=\"btn btn-green\">" + linkText +
                                "</a>\n"
                                "</div>\n";
-            return buildPage(raw_heading, body);
+            return buildPage(navigation, raw_heading, body);
         }
 
-        std::string errorPage(const std::string& raw_message) {
+        std::string errorPage(const Navigation& navigation, const std::string& raw_message) {
             const auto message = html(raw_message);
 
             std::string body = "<div class=\"card\">\n"
@@ -952,9 +987,11 @@ window.onload = () => {
                                "<div class=\"error-box\">" +
                                message +
                                "</div>\n"
-                               "<a href=\"/auth/login\" class=\"btn btn-secondary\">Back to Login</a>\n"
+                               "<a href=\"" +
+                               html(navigation.link("/auth/login")) +
+                               "\" class=\"btn btn-secondary\">Back to Login</a>\n"
                                "</div>\n";
-            return buildPage("Error", body);
+            return buildPage(navigation, "Error", body);
         }
 
         std::map<std::string, std::string> cookieOptions(unsigned seconds) {
@@ -973,14 +1010,15 @@ window.onload = () => {
             req->cookies["auth_flow"] = token;
             res->cookie("auth_flow", token, cookieOptions(600));
         }
-        void finishLogin(const auto& req, const auto& res, const std::string& userId, bool mfa, bool enrollment = false) {
+        void finishLogin(
+            const Navigation& navigation, const auto& req, const auto& res, const std::string& userId, bool mfa, bool enrollment = false) {
             const auto result = store.complete(req->cookie("auth_flow"), userId, mfa, enrollment);
             if (!result.at("session_cookie").template get<std::string>().empty()) {
                 res->cookie("snodec_session", result.at("session_cookie"), cookieOptions(86400));
             }
             res->cookie("auth_flow", "", cookieOptions(0));
             if (result.value("client_id", std::string()).empty()) {
-                res->redirect("/dashboard");
+                res->redirect(navigation.link(navigation.target.empty() ? "/dashboard" : "/settings"));
             } else {
                 const std::string target = result.at("redirect_uri");
                 res->redirect(target + (target.find('?') == std::string::npos ? "?" : "&") +
@@ -1003,12 +1041,30 @@ window.onload = () => {
                     res->status(403).send("Untrusted request origin");
                 } else {
                     try {
-                        if (req->method == "POST" &&
-                            (req->path == "/auth/login" || req->path == "/auth/register" || req->path == "/auth/mfa" ||
-                             req->path == "/auth/enroll/totp/verify" || req->path == "/auth/enroll/totp/skip")) {
-                            owner->store.formFlow(req->cookie("auth_flow"), owner->parseBody(req->body)["transaction"]);
+                        Navigation navigation{req->query("client_id"), req->query("return")};
+                        if (!navigation.target.empty()) {
+                            owner->store.accountReturn(navigation.clientId, navigation.target);
                         }
-                        handler(req, res, next);
+                        const bool usesFlow = req->path == "/auth/login" || req->path == "/auth/register" || req->path == "/auth/mfa" ||
+                                              req->path.starts_with("/auth/enroll/totp") || req->path.starts_with("/auth/federated/google");
+                        Json pending = Json::object();
+                        if (usesFlow && req->method == "POST") {
+                            pending = owner->store.formFlow(req->cookie("auth_flow"), owner->parseBody(req->body)["transaction"]);
+                        } else if (usesFlow && !navigation.target.empty()) {
+                            try {
+                                pending = owner->store.flow(req->cookie("auth_flow"));
+                            } catch (const std::exception&) {
+                            }
+                        }
+                        if (!navigation.target.empty() && !pending.value("client_id", std::string()).empty()) {
+                            res->status(409).send(owner->buildPage(
+                                navigation,
+                                "Sign-in already in progress",
+                                "<div class=\"card\"><h1>Sign-in already in progress</h1>"
+                                "<p>Finish the application sign-in in its original tab, then retry account settings.</p></div>"));
+                        } else {
+                            handler(navigation, req, res);
+                        }
                     } catch (const std::exception&) {
                         if (req->path == "/oauth2/token") {
                             res->status(400).set("Content-Type", "application/json").send(R"({"error":"invalid_grant"})");
@@ -1036,20 +1092,20 @@ window.onload = () => {
 
         void mount(const express::Router& app) {
             // ── GET / ─────────────────────────────────────────────────────────────────
-            app.get("/", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         if (!requireSession(req, res).empty()) {
-                            res->redirect("/dashboard");
+                            res->redirect(navigation.link("/dashboard"));
                         } else {
-                            res->send(landingPage());
+                            res->send(landingPage(navigation));
                         }
                     }));
 
             // ── GET /dashboard ────────────────────────────────────────────────────────
             app.get(
-                "/dashboard", safe([this] MIDDLEWARE(req, res, next) {
+                "/dashboard", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                     std::string userId = requireSession(req, res);
                     if (userId.empty()) {
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     } else {
                         std::string username, email;
                         int mfaEnabled = 0;
@@ -1075,16 +1131,16 @@ window.onload = () => {
                         });
 
                         std::string headerName = formatUserDisplayName(username, email);
-                        res->send(
-                            dashboardPage(headerName, totalUsers, activeSessions, pendingTokens, mfaUsers, formatUptime(), mfaEnabled > 0));
+                        res->send(dashboardPage(
+                            navigation, headerName, totalUsers, activeSessions, pendingTokens, mfaUsers, formatUptime(), mfaEnabled > 0));
                     }
                 }));
 
             // ── GET /settings ─────────────────────────────────────────────────────────
-            app.get("/settings", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/settings", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         std::string userId = requireSession(req, res);
                         if (userId.empty()) {
-                            res->redirect("/auth/login");
+                            res->redirect(navigation.link("/auth/login"));
                         } else {
                             std::string username, email, passwordHash;
                             int mfaEnabled = 0;
@@ -1101,17 +1157,16 @@ window.onload = () => {
                             // and an optional "back to app" target carried by the Account button.
                             const std::string msg = urlDecode(req->query("msg"));
                             const bool isErr = req->query("err") == "1";
-                            const std::string ret = urlDecode(req->query("return"));
                             res->send(
-                                settingsPage(username, email, mfaEnabled > 0, userId, isFederatedAccount(passwordHash), msg, isErr, ret));
+                                settingsPage(navigation, username, email, mfaEnabled > 0, isFederatedAccount(passwordHash), msg, isErr));
                         }
                     }));
 
             // ── GET /settings/mfa/disable ─────────────────────────────────────────────
-            app.get("/settings/mfa/disable", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/settings/mfa/disable", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         std::string userId = requireSession(req, res);
                         if (userId.empty()) {
-                            res->redirect("/auth/login");
+                            res->redirect(navigation.link("/auth/login"));
                         } else {
                             std::string username, email, hash;
                             int mfaEnabled = 0;
@@ -1125,19 +1180,19 @@ window.onload = () => {
                                      });
 
                             if (mfaEnabled <= 0) {
-                                res->redirect("/settings");
+                                res->redirect(navigation.link("/settings"));
                             } else {
-                                res->send(mfaDisableConfirmPage("", username, email, isFederatedAccount(hash)));
+                                res->send(mfaDisableConfirmPage(navigation, "", username, email, isFederatedAccount(hash)));
                             }
                         }
                     }));
 
             // ── POST /settings/mfa/disable ────────────────────────────────────────────
             app.post(
-                "/settings/mfa/disable", safe([this] MIDDLEWARE(req, res, next) {
+                "/settings/mfa/disable", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                     std::string userId = requireSession(req, res);
                     if (userId.empty()) {
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     } else {
                         auto p = parseBody(req->body);
                         const std::string password = p["password"];
@@ -1157,7 +1212,7 @@ window.onload = () => {
                                  });
 
                         if (mfaEnabled <= 0) {
-                            res->redirect("/settings");
+                            res->redirect(navigation.link("/settings"));
                         } else {
                             // Local accounts must re-authenticate with their password; federated
                             // (passwordless) accounts have none, so the MFA code alone gates this.
@@ -1165,7 +1220,7 @@ window.onload = () => {
                             bool needsMigration = false;
                             if (!federated && !verifyPasswordAny(password, hash, salt, needsMigration)) {
                                 res->status(400).send(
-                                    mfaDisableConfirmPage("Invalid password. Please try again.", username, email, federated));
+                                    mfaDisableConfirmPage(navigation, "Invalid password. Please try again.", username, email, federated));
                             } else {
                                 if (needsMigration) {
                                     migratePasswordHash(userId, password);
@@ -1173,14 +1228,14 @@ window.onload = () => {
 
                                 std::string decryptedSecret = decryptTotpSecret(totpSecret);
                                 if (!Totp::verifyCode(decryptedSecret, code)) {
-                                    res->status(400).send(
-                                        mfaDisableConfirmPage("Invalid verification code. Please try again.", username, email, federated));
+                                    res->status(400).send(mfaDisableConfirmPage(
+                                        navigation, "Invalid verification code. Please try again.", username, email, federated));
                                 } else {
                                     std::string err;
                                     if (!db.exec("UPDATE user SET totp_enabled=0, totp_secret=NULL WHERE id=?", {userId}, &err)) {
-                                        res->status(500).send(errorPage("DB error: " + err));
+                                        res->status(500).send(errorPage(navigation, "DB error: " + err));
                                     } else {
-                                        res->redirect("/settings");
+                                        res->redirect(navigation.link("/settings"));
                                     }
                                 }
                             }
@@ -1190,17 +1245,17 @@ window.onload = () => {
 
             // ── POST /settings/profile (update username + email) ──────────────────────
             app.post(
-                "/settings/profile", safe([this] MIDDLEWARE(req, res, next) {
+                "/settings/profile", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                     std::string userId = requireSession(req, res);
                     if (userId.empty()) {
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     } else {
                         auto p = parseBody(req->body);
                         const std::string newUsername = p["username"], newEmail = p["email"];
                         if (newUsername.size() < 3 || newUsername.size() > 64 || newEmail.empty() || newEmail.size() > 254 ||
                             newEmail.find('@') == std::string::npos) {
-                            res->redirect("/settings?err=1&msg=" +
-                                          snodec::auth::urlEncode("Please enter a valid username (3-64 chars) and email."));
+                            res->redirect(navigation.link(
+                                "/settings?err=1&msg=" + snodec::auth::urlEncode("Please enter a valid username (3-64 chars) and email.")));
                         } else {
                             bool taken = false;
                             db.query("SELECT id FROM user WHERE (username=? OR email=?) AND id<>?",
@@ -1209,16 +1264,18 @@ window.onload = () => {
                                          taken = true;
                                      });
                             if (taken) {
-                                res->redirect("/settings?err=1&msg=" +
-                                              snodec::auth::urlEncode("That username or email is already in use."));
+                                res->redirect(navigation.link("/settings?err=1&msg=" +
+                                                              snodec::auth::urlEncode("That username or email is already in use.")));
                             } else {
                                 std::string err;
                                 if (!db.exec("UPDATE user SET username=?, email=? WHERE id=?", {newUsername, newEmail, userId}, &err)) {
-                                    res->redirect("/settings?err=1&msg=" + snodec::auth::urlEncode("Could not save profile: " + err));
+                                    res->redirect(navigation.link("/settings?err=1&msg=" +
+                                                                  snodec::auth::urlEncode("Could not save profile: " + err)));
                                 } else {
-                                    res->redirect("/settings?msg=" +
-                                                  snodec::auth::urlEncode(
-                                                      "Profile updated. Sign in again at applications to refresh profile claims."));
+                                    res->redirect(
+                                        navigation.link("/settings?msg=" +
+                                                        snodec::auth::urlEncode(
+                                                            "Profile updated. Sign in again at applications to refresh profile claims.")));
                                 }
                             }
                         }
@@ -1227,18 +1284,20 @@ window.onload = () => {
 
             // ── POST /settings/password (change for local / set for federated) ────────
             app.post(
-                "/settings/password", safe([this] MIDDLEWARE(req, res, next) {
+                "/settings/password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                     std::string userId = requireSession(req, res);
                     if (userId.empty()) {
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     } else {
                         auto p = parseBody(req->body);
                         const std::string currentPw = p["current_password"], newPw = p["new_password"], confirmPw = p["confirm_password"];
                         if (newPw.size() < 8 || newPw.size() > 128) {
-                            res->redirect("/settings?err=1&msg=" + snodec::auth::urlEncode("New password must be 8-128 characters."));
+                            res->redirect(navigation.link("/settings?err=1&msg=" +
+                                                          snodec::auth::urlEncode("New password must be 8-128 characters.")));
                         } else {
                             if (newPw != confirmPw) {
-                                res->redirect("/settings?err=1&msg=" + snodec::auth::urlEncode("New passwords do not match."));
+                                res->redirect(
+                                    navigation.link("/settings?err=1&msg=" + snodec::auth::urlEncode("New passwords do not match.")));
                             } else {
                                 std::string hash, salt;
                                 db.query("SELECT password_hash, password_salt FROM user WHERE id=?",
@@ -1250,27 +1309,28 @@ window.onload = () => {
                                 const bool federated = isFederatedAccount(hash);
                                 bool needsMigration = false;
                                 if (!federated && !verifyPasswordAny(currentPw, hash, salt, needsMigration)) {
-                                    res->redirect("/settings?err=1&msg=" + snodec::auth::urlEncode("Your current password is incorrect."));
+                                    res->redirect(navigation.link("/settings?err=1&msg=" +
+                                                                  snodec::auth::urlEncode("Your current password is incorrect.")));
                                 } else {
                                     // The current password is correct here, so an identical new password
                                     // is just a reuse of the old one — reject it.
                                     if (!federated && newPw == currentPw) {
-                                        res->redirect(
+                                        res->redirect(navigation.link(
                                             "/settings?err=1&msg=" +
-                                            snodec::auth::urlEncode("New password must be different from your current password."));
+                                            snodec::auth::urlEncode("New password must be different from your current password.")));
                                     } else {
                                         std::string err;
                                         if (!db.exec("UPDATE user SET password_hash=?, password_salt='' WHERE id=?",
                                                      {PasswordHasher::hashPassword(newPw), userId},
                                                      &err)) {
-                                            res->redirect("/settings?err=1&msg=" +
-                                                          snodec::auth::urlEncode("Could not update password: " + err));
+                                            res->redirect(navigation.link("/settings?err=1&msg=" +
+                                                                          snodec::auth::urlEncode("Could not update password: " + err)));
                                         } else {
-                                            res->redirect("/settings?msg=" +
-                                                          snodec::auth::urlEncode(
-                                                              federated
-                                                                  ? "Password set. You can now also sign in with username and password."
-                                                                  : "Password changed."));
+                                            res->redirect(navigation.link(
+                                                "/settings?msg=" +
+                                                snodec::auth::urlEncode(
+                                                    federated ? "Password set. You can now also sign in with username and password."
+                                                              : "Password changed.")));
                                         }
                                     }
                                 }
@@ -1280,10 +1340,10 @@ window.onload = () => {
                 }));
 
             // ── GET /settings/delete (confirmation page) ──────────────────────────────
-            app.get("/settings/delete", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/settings/delete", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         std::string userId = requireSession(req, res);
                         if (userId.empty()) {
-                            res->redirect("/auth/login");
+                            res->redirect(navigation.link("/auth/login"));
                         } else {
                             std::string username, email, hash;
                             int mfaEnabled = 0;
@@ -1295,16 +1355,17 @@ window.onload = () => {
                                          hash = r.get(2);
                                          mfaEnabled = std::stoi(r.get(3));
                                      });
-                            res->send(deleteAccountConfirmPage(username, email, "", false, isFederatedAccount(hash), mfaEnabled > 0));
+                            res->send(
+                                deleteAccountConfirmPage(navigation, username, email, "", false, isFederatedAccount(hash), mfaEnabled > 0));
                         }
                     }));
 
             // ── POST /settings/delete (permanently remove the account) ────────────────
             app.post(
-                "/settings/delete", safe([this] MIDDLEWARE(req, res, next) {
+                "/settings/delete", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                     std::string userId = requireSession(req, res);
                     if (userId.empty()) {
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     } else {
                         std::string username, email, hash, salt, totpSecret;
                         int mfaEnabled = 0;
@@ -1322,22 +1383,33 @@ window.onload = () => {
                         const bool mfa = mfaEnabled > 0;
                         auto p = parseBody(req->body);
                         if (p["confirm_username"] != username) {
-                            res->status(400).send(deleteAccountConfirmPage(
-                                username, email, "The username did not match. Your account was not deleted.", true, federated, mfa));
+                            res->status(400).send(deleteAccountConfirmPage(navigation,
+                                                                           username,
+                                                                           email,
+                                                                           "The username did not match. Your account was not deleted.",
+                                                                           true,
+                                                                           federated,
+                                                                           mfa));
                         } else {
                             // Local accounts must re-authenticate with their password before this
                             // irreversible action. Federated (passwordless) accounts confirm by
                             // username only — they have no local password to enter.
                             bool needsMigration = false;
                             if (!federated && !verifyPasswordAny(p["password"], hash, salt, needsMigration)) {
-                                res->status(400).send(deleteAccountConfirmPage(
-                                    username, email, "Your password was incorrect. Your account was not deleted.", true, federated, mfa));
+                                res->status(400).send(deleteAccountConfirmPage(navigation,
+                                                                               username,
+                                                                               email,
+                                                                               "Your password was incorrect. Your account was not deleted.",
+                                                                               true,
+                                                                               federated,
+                                                                               mfa));
                             } else {
                                 // Accounts with MFA enabled must also confirm with a current TOTP code,
                                 // whether the account is local or federated.
                                 if (mfa && !Totp::verifyCode(decryptTotpSecret(totpSecret), p["code"])) {
                                     res->status(400).send(
-                                        deleteAccountConfirmPage(username,
+                                        deleteAccountConfirmPage(navigation,
+                                                                 username,
                                                                  email,
                                                                  "Your authenticator code was incorrect. Your account was not deleted.",
                                                                  true,
@@ -1347,10 +1419,10 @@ window.onload = () => {
                                     std::string err;
 
                                     if (!db.exec("DELETE FROM user WHERE id=?", {userId}, &err)) {
-                                        res->status(500).send(errorPage("Could not delete account: " + err));
+                                        res->status(500).send(errorPage(navigation, "Could not delete account: " + err));
                                     } else {
                                         res->cookie("snodec_session", "", {{"Path", "/"}, {"Max-Age", "0"}});
-                                        res->redirect("/auth/login");
+                                        res->redirect(navigation.link("/auth/login"));
                                     }
                                 }
                             }
@@ -1359,17 +1431,20 @@ window.onload = () => {
                 }));
 
             // ── POST /auth/logout ─────────────────────────────────────────────────────
-            app.post("/auth/logout", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/logout", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          store.execute("DELETE FROM session WHERE token=?", {sha256(req->cookie("snodec_session"))});
                          res->cookie("snodec_session", "", {{"Path", "/"}, {"Max-Age", "0"}});
-                         res->redirect("/auth/login");
+                         res->redirect(navigation.link("/auth/login"));
                      }));
 
-            app.get("/auth/logout", safe([this] MIDDLEWARE(req, res, next) {
-                        res->send(buildPage("Sign out", "<form method=\"post\" action=\"/auth/logout\"><button>Sign out</button></form>"));
+            app.get("/auth/logout", safe([this](const Navigation& navigation, const auto&, const auto& res) {
+                        res->send(buildPage(navigation,
+                                            "Sign out",
+                                            "<form method=\"post\" action=\"" + html(navigation.link("/auth/logout")) +
+                                                "\"><button>Sign out</button></form>"));
                     }));
 
-            app.get("/auth/login", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/login", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         Json context;
                         try {
                             context = store.flow(req->cookie("auth_flow"));
@@ -1382,20 +1457,20 @@ window.onload = () => {
                             context["user_id"] = session.at("user_id");
                             context["sid"] = session.at("sid");
                             store.save(req->cookie("auth_flow"), context);
-                            finishLogin(req, res, context.at("user_id"), session.at("mfa_verified"));
+                            finishLogin(navigation, req, res, context.at("user_id"), session.at("mfa_verified"));
                         } else {
-                            res->send(loginPage(sha256(req->cookie("auth_flow"))));
+                            res->send(loginPage(navigation, sha256(req->cookie("auth_flow"))));
                         }
                     }));
-            app.get("/auth/register", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/register", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         try {
                             store.flow(req->cookie("auth_flow"));
                         } catch (const std::exception&) {
                             startFlow(req, res, Json::object());
                         }
-                        res->send(registerPage(sha256(req->cookie("auth_flow"))));
+                        res->send(registerPage(navigation, sha256(req->cookie("auth_flow"))));
                     }));
-            app.post("/auth/register", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/register", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          auto context = store.flow(req->cookie("auth_flow"));
                          const auto fields = Json(parseBody(req->body));
                          const auto username = fields.value("username", std::string());
@@ -1414,12 +1489,12 @@ window.onload = () => {
                          context["enrollment"] = enroll;
                          store.save(req->cookie("auth_flow"), context);
                          if (enroll) {
-                             res->redirect("/auth/enroll/totp");
+                             res->redirect(navigation.link("/auth/enroll/totp"));
                          } else {
-                             finishLogin(req, res, id, false);
+                             finishLogin(navigation, req, res, id, false);
                          }
                      }));
-            app.post("/auth/login", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/login", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          auto context = store.flow(req->cookie("auth_flow"));
                          auto fields = parseBody(req->body);
                          const auto username = fields["username"];
@@ -1438,7 +1513,7 @@ window.onload = () => {
                                  "Login unavailable");
                          if (id.empty() || !verifyPasswordAny(fields["password"], hash, salt, migrate)) {
                              loginLimiter.recordFailure(username);
-                             res->status(401).send(loginPage(sha256(req->cookie("auth_flow")), "Invalid credentials"));
+                             res->status(401).send(loginPage(navigation, sha256(req->cookie("auth_flow")), "Invalid credentials"));
                          } else {
                              if (migrate) {
                                  migratePasswordHash(id, fields["password"]);
@@ -1447,17 +1522,17 @@ window.onload = () => {
                              context["user_id"] = id;
                              store.save(req->cookie("auth_flow"), context);
                              if (mfa) {
-                                 res->send(mfaPage(sha256(req->cookie("auth_flow"))));
+                                 res->send(mfaPage(navigation, sha256(req->cookie("auth_flow"))));
                              } else if (context.value("enrollment", false)) {
-                                 res->redirect("/auth/enroll/totp");
+                                 res->redirect(navigation.link("/auth/enroll/totp"));
                              } else {
-                                 finishLogin(req, res, id, false);
+                                 finishLogin(navigation, req, res, id, false);
                              }
                          }
                      }));
-            app.post("/auth/mfa", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/mfa", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          const auto context = store.flow(req->cookie("auth_flow"));
-                         const auto id = context.at("user_id").get<std::string>();
+                         const auto id = context.at("user_id").template get<std::string>();
                          require(mfaLimiter.isAllowed(id), "MFA rate limited");
                          std::string secret;
                          require(db.query("SELECT totp_secret FROM user WHERE id=? AND totp_enabled=1",
@@ -1469,13 +1544,13 @@ window.onload = () => {
                          const auto code = parseBody(req->body)["code"];
                          if (secret.empty() || !Totp::verifyCode(decryptTotpSecret(secret), code)) {
                              mfaLimiter.recordFailure(id);
-                             res->status(401).send(mfaPage(sha256(req->cookie("auth_flow")), "Invalid code"));
+                             res->status(401).send(mfaPage(navigation, sha256(req->cookie("auth_flow")), "Invalid code"));
                          } else {
                              mfaLimiter.recordSuccess(id);
-                             finishLogin(req, res, id, true);
+                             finishLogin(navigation, req, res, id, true);
                          }
                      }));
-            app.get("/auth/enroll/totp", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/enroll/totp", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         Json context;
                         const auto session = store.session(req->cookie("snodec_session"));
                         if (session.is_object()) {
@@ -1486,7 +1561,7 @@ window.onload = () => {
                             context = store.flow(req->cookie("auth_flow"));
                         }
                         require(context.value("enrollment", false), "Enrollment not authorized");
-                        const auto id = context.at("user_id").get<std::string>();
+                        const auto id = context.at("user_id").template get<std::string>();
                         std::string username;
                         require(db.query("SELECT username FROM user WHERE id=? AND totp_enabled=0",
                                          {id},
@@ -1498,33 +1573,35 @@ window.onload = () => {
                         const auto secret = Totp::generateSecret();
                         context["secret"] = encryptTotpSecret(secret);
                         store.save(req->cookie("auth_flow"), context);
-                        res->send(enrollTotpPage(
-                            secret, QrCodeGenerator::makeTotpOtpAuthUri("SNode.C", username, secret), sha256(req->cookie("auth_flow"))));
+                        res->send(enrollTotpPage(navigation,
+                                                 secret,
+                                                 QrCodeGenerator::makeTotpOtpAuthUri("SNode.C", username, secret),
+                                                 sha256(req->cookie("auth_flow"))));
                     }));
-            app.post("/auth/enroll/totp/verify", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/enroll/totp/verify", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          auto context = store.flow(req->cookie("auth_flow"));
                          require(context.value("enrollment", false), "Enrollment not authorized");
-                         const auto id = context.at("user_id").get<std::string>();
+                         const auto id = context.at("user_id").template get<std::string>();
                          require(mfaLimiter.isAllowed(id), "MFA rate limited");
                          const auto secret = decryptTotpSecret(context.at("secret"));
                          if (!Totp::verifyCode(secret, parseBody(req->body)["code"])) {
                              mfaLimiter.recordFailure(id);
                              res->status(401).send("Invalid code; return to enrollment");
                          } else {
-                             finishLogin(req, res, id, true, true);
+                             finishLogin(navigation, req, res, id, true, true);
                          }
                      }));
-            app.post("/auth/enroll/totp/skip", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/enroll/totp/skip", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          const auto context = store.flow(req->cookie("auth_flow"));
                          require(context.value("enrollment", false), "Enrollment not authorized");
-                         const auto id = context.at("user_id").get<std::string>();
+                         const auto id = context.at("user_id").template get<std::string>();
                          store.execute("UPDATE user SET activated=1 WHERE id=? AND totp_enabled=0", {id});
                          require(db.changedRows() == 1, "Cannot skip completed MFA");
-                         finishLogin(req, res, id, false);
+                         finishLogin(navigation, req, res, id, false);
                      }));
 
             // ── GET /api/qrcode ───────────────────────────────────────────────────────
-            app.get("/api/qrcode", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/api/qrcode", safe([this](const Navigation&, const auto& req, const auto& res) {
                         std::string data = httputils::url_decode(req->query("data"));
                         if (data.empty()) {
                             res->status(400).send("Missing data");
@@ -1542,25 +1619,26 @@ window.onload = () => {
                     }));
 
             // ── GET /auth/forgot-password ─────────────────────────────────────────────
-            app.get("/auth/forgot-password", safe([this] MIDDLEWARE(req, res, next) {
-                        res->send(forgotPasswordPage("", ""));
+            app.get("/auth/forgot-password", safe([this](const Navigation& navigation, const auto&, const auto& res) {
+                        res->send(forgotPasswordPage(navigation, "", ""));
                     }));
 
-            app.post("/auth/forgot-password", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/auth/forgot-password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          const auto email = parseBody(req->body)["email"];
                          require(loginLimiter.isAllowed("reset:" + email), "Reset rate limited");
                          loginLimiter.recordFailure("reset:" + email);
                          store.requestReset(email, [this](const std::string& address, const std::string& token) {
                              sendPasswordResetLink(address, config.issuer + "/auth/reset-password?token=" + urlEncode(token));
                          });
-                         res->send(forgotPasswordPage("", "If this account exists and delivery is available, a reset email will be sent."));
+                         res->send(forgotPasswordPage(
+                             navigation, "", "If this account exists and delivery is available, a reset email will be sent."));
                      }));
 
             // ── GET /auth/reset-password ──────────────────────────────────────────────
-            app.get("/auth/reset-password", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/reset-password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         const std::string token = req->query("token");
                         if (token.empty()) {
-                            res->send(errorPage("Missing reset token."));
+                            res->send(errorPage(navigation, "Missing reset token."));
                         } else {
                             // Validate token
                             bool valid = false;
@@ -1571,33 +1649,35 @@ window.onload = () => {
                                          valid = true;
                                      });
                             if (!valid) {
-                                res->send(errorPage("This reset link is invalid or has expired."
+                                res->send(errorPage(navigation,
+                                                    "This reset link is invalid or has expired."
                                                     " Please request a new one."));
                             } else {
-                                res->send(resetPasswordPage(token, ""));
+                                res->send(resetPasswordPage(navigation, token, ""));
                             }
                         }
                     }));
 
             // ── POST /auth/reset-password ─────────────────────────────────────────────
-            app.post("/auth/reset-password", safe([this] MIDDLEWARE(req, res, next) {
-                         auto p = parseBody(req->body);
-                         const std::string token = p["token"], pw = p["password"], pw2 = p["password_confirm"];
-                         if (token.empty() || pw.size() < 8 || pw.size() > 128) {
-                             res->send(resetPasswordPage(token, "All fields are required."));
-                         } else {
-                             if (pw != pw2) {
-                                 res->send(resetPasswordPage(token, "Passwords do not match."));
-                             } else {
-                                 store.resetPassword(token, PasswordHasher::hashPassword(pw));
-                                 res->send(successPage(
-                                     "Password Reset", "Your password has been updated successfully.", "/auth/login", "Sign In"));
-                             }
-                         }
-                     }));
+            app.post(
+                "/auth/reset-password", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
+                    auto p = parseBody(req->body);
+                    const std::string token = p["token"], pw = p["password"], pw2 = p["password_confirm"];
+                    if (token.empty() || pw.size() < 8 || pw.size() > 128) {
+                        res->send(resetPasswordPage(navigation, token, "All fields are required."));
+                    } else {
+                        if (pw != pw2) {
+                            res->send(resetPasswordPage(navigation, token, "Passwords do not match."));
+                        } else {
+                            store.resetPassword(token, PasswordHasher::hashPassword(pw));
+                            res->send(successPage(
+                                navigation, "Password Reset", "Your password has been updated successfully.", "/auth/login", "Sign In"));
+                        }
+                    }
+                }));
 
             // ── GET /auth/help/authenticator ──────────────────────────────────────────
-            app.get("/auth/help/authenticator", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/help/authenticator", safe([this](const Navigation& navigation, const auto&, const auto& res) {
                         std::string body = "<div class=\"card\" style=\"max-width:600px;\">\n"
                                            "<a href=\"javascript:history.back()\" style=\"color:#63b3ed;"
                                            "font-size:0.85rem;text-decoration:none;\">← Back</a>\n"
@@ -1620,14 +1700,14 @@ window.onload = () => {
                                            "💡 <strong>Can't scan?</strong> Use the manual entry key shown "
                                            "below the QR code — tap <em>Enter setup key</em> in your app.\n"
                                            "</div>\n</div>\n";
-                        res->send(buildPage("Authenticator Help", body));
+                        res->send(buildPage(navigation, "Authenticator Help", body));
                     }));
 
-            app.get("/oauth2/authorize", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/oauth2/authorize", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         startFlow(req, res, store.authorization(Json(req->queries)));
-                        res->redirect("/auth/login");
+                        res->redirect(navigation.link("/auth/login"));
                     }));
-            app.post("/oauth2/token", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/oauth2/token", safe([this](const Navigation&, const auto& req, const auto& res) {
                          const auto context = store.redeem(Json(parseBody(req->body)));
                          JwtClaims claims;
                          claims.subject = context.at("user_id");
@@ -1659,7 +1739,7 @@ window.onload = () => {
                          }
                          res->set("Content-Type", "application/json").send(result.dump());
                      }));
-            app.post("/oauth2/introspect", safe([this] MIDDLEWARE(req, res, next) {
+            app.post("/oauth2/introspect", safe([this](const Navigation&, const auto& req, const auto& res) {
                          auto fields = parseBody(req->body);
                          require(req->get("Authorization") == "Bearer " + fields["token"], "Bearer authentication required");
                          Json result = {{"active", false}};
@@ -1673,14 +1753,14 @@ window.onload = () => {
                          }
                          res->set("Content-Type", "application/json").send(result.dump());
                      }));
-            app.get("/oauth2/userinfo", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/oauth2/userinfo", safe([this](const Navigation&, const auto& req, const auto& res) {
                         const auto header = req->get("Authorization");
                         require(header.starts_with("Bearer "), "Bearer token required");
                         const auto token = header.substr(7);
                         const auto first = token.find('.'), second = token.find('.', first + 1);
                         require(first != std::string::npos && second != std::string::npos, "Invalid token");
                         const auto audience =
-                            Json::parse(decodeBase64Url(token.substr(first + 1, second - first - 1))).at("aud").get<std::string>();
+                            Json::parse(decodeBase64Url(token.substr(first + 1, second - first - 1))).at("aud").template get<std::string>();
                         const auto claims = verifiedToken(token, audience);
                         require(std::find(claims.scopes.begin(), claims.scopes.end(), "openid") != claims.scopes.end(),
                                 "OpenID scope required");
@@ -1698,7 +1778,7 @@ window.onload = () => {
             // Publishes the RS256 public key as a JWK Set so relying parties can fetch
             // and rotate the verification key automatically instead of receiving the
             // public key out of band.
-            app.get("/.well-known/jwks.json", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/.well-known/jwks.json", safe([this](const Navigation&, const auto&, const auto& res) {
                         res->set("Content-Type", "application/json")
                             .set("Cache-Control", "public,max-age=3600")
                             .set("Access-Control-Allow-Origin", "*")
@@ -1708,7 +1788,7 @@ window.onload = () => {
             // ── GET /.well-known/openid-configuration ─────────────────────────────────
             // OpenID Connect discovery document, so standard OAuth 2.0 / OIDC clients can
             // configure themselves from the issuer URL alone.
-            app.get("/.well-known/openid-configuration", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/.well-known/openid-configuration", safe([this](const Navigation&, const auto&, const auto& res) {
                         json d;
                         d["issuer"] = config.issuer;
                         d["authorization_endpoint"] = config.issuer + "/oauth2/authorize";
@@ -1730,7 +1810,7 @@ window.onload = () => {
                     }));
 
             // ── GET /health ───────────────────────────────────────────────────────────
-            app.get("/health", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/health", safe([this](const Navigation&, const auto&, const auto& res) {
                         json h;
                         h["status"] = "ok";
                         h["service"] = "snodec-idp";
@@ -1739,7 +1819,7 @@ window.onload = () => {
                         res->set("Content-Type", "application/json").send(h.dump());
                     }));
 
-            app.get("/auth/federated/google", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/federated/google", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         require(!config.googleClientId.empty() && !config.googleClientSecret.empty(), "Google login is disabled");
                         auto context = store.flow(req->cookie("auth_flow"));
                         context.erase("sid");
@@ -1747,6 +1827,8 @@ window.onload = () => {
                         context.erase("user_id");
                         context.erase("enrollment");
                         context.erase("secret");
+                        context["account_client"] = navigation.clientId;
+                        context["account_return"] = navigation.target;
                         context["provider_state"] = randomToken();
                         context["provider_nonce"] = randomToken();
                         context["provider_verifier"] = randomToken();
@@ -1761,13 +1843,21 @@ window.onload = () => {
                                                   {"code_challenge", sha256(context.at("provider_verifier"))},
                                                   {"code_challenge_method", "S256"}}));
                     }));
-            app.get("/auth/federated/google/callback", safe([this] MIDDLEWARE(req, res, next) {
+            app.get("/auth/federated/google/callback",
+                    safe([this]([[maybe_unused]] const Navigation&, [[maybe_unused]] const auto& req, [[maybe_unused]] const auto& res) {
                         require(!config.googleClientId.empty() && !config.googleClientSecret.empty(), "Google login is disabled");
                         const auto flowToken = req->cookie("auth_flow");
                         auto context = store.flow(flowToken);
                         require(!req->query("code").empty() && !req->query("state").empty() &&
                                     context.at("provider_state") == req->query("state"),
                                 "Invalid federation transaction");
+                        const Navigation navigation{context.value("account_client", std::string()),
+                                                    context.value("account_return", std::string())};
+                        if (!navigation.target.empty()) {
+                            store.accountReturn(navigation.clientId, navigation.target);
+                        }
+                        context.erase("account_client");
+                        context.erase("account_return");
                         context.erase("provider_state");
                         store.save(flowToken, context);
                         const auto body = formEncode({{"client_id", config.googleClientId},
@@ -1781,23 +1871,24 @@ window.onload = () => {
                             "POST",
                             body,
                             {{"Content-Type", "application/x-www-form-urlencoded"}},
-                            [this, owner = shared_from_this(), req, res, context, flowToken](HttpResult response) {
+                            [this, owner = shared_from_this(), req, res, context, flowToken, navigation](HttpResult response) {
                                 try {
                                     require(response.status == 200, "Provider exchange failed");
-                                    const auto token = Json::parse(response.body).at("id_token").get<std::string>();
+                                    const auto token = Json::parse(response.body).at("id_token").template get<std::string>();
                                     httpExchange(
                                         "https://www.googleapis.com/oauth2/v3/certs",
                                         "GET",
                                         "",
                                         {},
-                                        [this, owner = shared_from_this(), req, res, context, flowToken, token](HttpResult keys) mutable {
+                                        [this, owner = shared_from_this(), req, res, context, flowToken, token, navigation](
+                                            HttpResult keys) mutable {
                                             try {
                                                 require(keys.status == 200 &&
                                                             store.flow(flowToken).at("provider_nonce") == context.at("provider_nonce"),
                                                         "Expired provider transaction");
                                                 const auto identity = googleIdentity(
                                                     token, Json::parse(keys.body), config.googleClientId, context.at("provider_nonce"));
-                                                const auto subject = identity.at("sub").get<std::string>();
+                                                const auto subject = identity.at("sub").template get<std::string>();
                                                 std::string user;
                                                 bool mfa = false;
                                                 require(db.query("SELECT user.id,user.totp_enabled FROM federated_identity JOIN user ON "
@@ -1809,7 +1900,7 @@ window.onload = () => {
                                                                  }),
                                                         "Identity lookup failed");
                                                 if (user.empty()) {
-                                                    const auto email = identity.at("email").get<std::string>();
+                                                    const auto email = identity.at("email").template get<std::string>();
                                                     require(email.size() <= 254 && email.find_first_of("\r\n") == std::string::npos,
                                                             "Invalid provider email");
                                                     store.execute("BEGIN IMMEDIATE");
@@ -1834,9 +1925,9 @@ window.onload = () => {
                                                 context["user_id"] = user;
                                                 store.save(flowToken, context);
                                                 if (mfa) {
-                                                    res->send(mfaPage(sha256(req->cookie("auth_flow"))));
+                                                    res->send(mfaPage(navigation, sha256(req->cookie("auth_flow"))));
                                                 } else {
-                                                    finishLogin(req, res, user, false);
+                                                    finishLogin(navigation, req, res, user, false);
                                                 }
                                             } catch (const std::exception&) {
                                                 res->status(401).send("Google authentication failed");

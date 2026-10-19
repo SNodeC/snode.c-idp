@@ -31,8 +31,8 @@ int main(int argc, char** argv) {
     snodec::auth::callback::OAuth2CallbackHandler callback(client);
     const express::Router app;
     app.get(callbackPath, callback);
-    app.get("/account", [issuer] APPLICATION(req, res) {
-        res->redirect(303, issuer + "/settings");
+    app.get("/account", [client] APPLICATION(req, res) {
+        res->redirect(303, client->accountUrl("/private"));
     });
     app.get("/sign-out", [issuer] APPLICATION(req, res) {
         res->redirect(303, issuer + "/auth/logout");

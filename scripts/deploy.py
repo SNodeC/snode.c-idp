@@ -313,8 +313,7 @@ def deploy(config):
                   IDP_PRIVATE_KEY_PATH=str(DATA / 'keys/private.pem'), TOTP_KEY_PATH=str(DATA / 'keys/totp.key'),
                   IDP_CLIENTS=json.dumps(config['clients']), HOST_REDIRECTS=json.dumps(config.get('redirects', {})),
                   OAUTH_GOOGLE_CLIENT_ID=config.get('google_client_id', ''),
-                  OAUTH_GOOGLE_CLIENT_SECRET=config.get('google_client_secret', ''), SMTP_COMMAND=mail_command,
-                  PROTECTED_WEBAPP_URL=https_origin(example['hostname'], example['port']) if example else '')
+                  OAUTH_GOOGLE_CLIENT_SECRET=config.get('google_client_secret', ''), SMTP_COMMAND=mail_command)
     write(CONFIG / 'idp.env', environment(values))
     write(CONFIG / 'empty.conf', '', 0o644)
     write(CONFIG / 'public.pem', public, 0o644)
