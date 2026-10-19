@@ -521,8 +521,11 @@ window.onload = () => {
                                  "<button>Verify</button></form></div>");
         }
 
-        std::string
-        enrollTotpPage(const Navigation& navigation, const std::string& secret, const std::string& uri, const std::string& transaction) {
+        std::string enrollTotpPage(const Navigation& navigation,
+                                   const std::string& secret,
+                                   const std::string& uri,
+                                   const std::string& transaction,
+                                   bool required) {
             return buildPage(navigation,
                              "Enable two-factor authentication",
                              "<div class=\"card\"><h1>Set up your authenticator</h1>"
@@ -532,10 +535,13 @@ window.onload = () => {
                                  "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
                                  "\"><input name=\"code\" aria-label=\"Authenticator code\" inputmode=\"numeric\" "
                                  "autocomplete=\"one-time-code\" pattern=\"[0-9]{6}\" required>"
-                                 "<button>Activate</button></form><form method=\"post\" action=\"" +
-                                 html(navigation.link("/auth/enroll/totp/skip")) + "\">" +
-                                 "<input type=\"hidden\" name=\"transaction\" value=\"" + html(transaction) +
-                                 "\"><button>Skip</button></form></div>");
+                                 "<button>Activate</button></form>" +
+                                 (required ? "<p>This application requires two-factor authentication.</p>"
+                                           : "<form method=\"post\" action=\"" + html(navigation.link("/auth/enroll/totp/skip")) +
+                                                 "\">"
+                                                 "<input type=\"hidden\" name=\"transaction\" value=\"" +
+                                                 html(transaction) + "\"><button>Skip</button></form>") +
+                                 "</div>");
         }
 
         std::string landingPage(const Navigation& navigation) {
@@ -1012,17 +1018,35 @@ window.onload = () => {
         }
         void finishLogin(
             const Navigation& navigation, const auto& req, const auto& res, const std::string& userId, bool mfa, bool enrollment = false) {
-            const auto result = store.complete(req->cookie("auth_flow"), userId, mfa, enrollment);
-            if (!result.at("session_cookie").template get<std::string>().empty()) {
-                res->cookie("snodec_session", result.at("session_cookie"), cookieOptions(86400));
-            }
-            res->cookie("auth_flow", "", cookieOptions(0));
-            if (result.value("client_id", std::string()).empty()) {
-                res->redirect(navigation.link(navigation.target.empty() ? "/dashboard" : "/settings"));
+            auto context = store.flow(req->cookie("auth_flow"));
+            if (!mfa && context.value("acr_values", std::string()) == "urn:snodec:acr:mfa") {
+                bool enabled = false;
+                require(db.query("SELECT totp_enabled FROM user WHERE id=?",
+                                 {userId},
+                                 [&](const auto& row) {
+                                     enabled = row.get(0) == "1";
+                                 }),
+                        "MFA lookup failed");
+                context["enrollment"] = !enabled;
+                store.save(req->cookie("auth_flow"), context);
+                if (enabled) {
+                    res->send(mfaPage(navigation, sha256(req->cookie("auth_flow"))));
+                } else {
+                    res->redirect(navigation.link("/auth/enroll/totp"));
+                }
             } else {
-                const std::string target = result.at("redirect_uri");
-                res->redirect(target + (target.find('?') == std::string::npos ? "?" : "&") +
-                              formEncode({{"code", result.at("code")}, {"state", result.at("state")}}));
+                const auto result = store.complete(req->cookie("auth_flow"), userId, mfa, enrollment);
+                if (!result.at("session_cookie").template get<std::string>().empty()) {
+                    res->cookie("snodec_session", result.at("session_cookie"), cookieOptions(86400));
+                }
+                res->cookie("auth_flow", "", cookieOptions(0));
+                if (result.value("client_id", std::string()).empty()) {
+                    res->redirect(navigation.link(navigation.target.empty() ? "/dashboard" : "/settings"));
+                } else {
+                    const std::string target = result.at("redirect_uri");
+                    res->redirect(target + (target.find('?') == std::string::npos ? "?" : "&") +
+                                  formEncode({{"code", result.at("code")}, {"state", result.at("state")}}));
+                }
             }
         }
         std::string requireSession(const auto& req, const auto&) {
@@ -1456,6 +1480,7 @@ window.onload = () => {
                         if (session.is_object()) {
                             context["user_id"] = session.at("user_id");
                             context["sid"] = session.at("sid");
+                            context["mfa_verified"] = session.at("mfa_verified");
                             store.save(req->cookie("auth_flow"), context);
                             finishLogin(navigation, req, res, context.at("user_id"), session.at("mfa_verified"));
                         } else {
@@ -1552,13 +1577,16 @@ window.onload = () => {
                      }));
             app.get("/auth/enroll/totp", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                         Json context;
+                        try {
+                            context = store.flow(req->cookie("auth_flow"));
+                        } catch (const std::exception&) {
+                            context = Json::object();
+                        }
                         const auto session = store.session(req->cookie("snodec_session"));
-                        if (session.is_object()) {
-                            context = session;
+                        if (session.is_object() && !context.value("enrollment", false)) {
+                            context.update(session);
                             context["enrollment"] = true;
                             startFlow(req, res, context);
-                        } else {
-                            context = store.flow(req->cookie("auth_flow"));
                         }
                         require(context.value("enrollment", false), "Enrollment not authorized");
                         const auto id = context.at("user_id").template get<std::string>();
@@ -1576,7 +1604,8 @@ window.onload = () => {
                         res->send(enrollTotpPage(navigation,
                                                  secret,
                                                  QrCodeGenerator::makeTotpOtpAuthUri("SNode.C", username, secret),
-                                                 sha256(req->cookie("auth_flow"))));
+                                                 sha256(req->cookie("auth_flow")),
+                                                 context.value("acr_values", std::string()) == "urn:snodec:acr:mfa"));
                     }));
             app.post("/auth/enroll/totp/verify", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          auto context = store.flow(req->cookie("auth_flow"));
@@ -1594,6 +1623,7 @@ window.onload = () => {
             app.post("/auth/enroll/totp/skip", safe([this](const Navigation& navigation, const auto& req, const auto& res) {
                          const auto context = store.flow(req->cookie("auth_flow"));
                          require(context.value("enrollment", false), "Enrollment not authorized");
+                         require(context.value("acr_values", std::string()) != "urn:snodec:acr:mfa", "MFA required by application");
                          const auto id = context.at("user_id").template get<std::string>();
                          store.execute("UPDATE user SET activated=1 WHERE id=? AND totp_enabled=0", {id});
                          require(db.changedRows() == 1, "Cannot skip completed MFA");
@@ -1801,8 +1831,10 @@ window.onload = () => {
                         d["id_token_signing_alg_values_supported"] = json::array({"RS256"});
                         d["token_endpoint_auth_methods_supported"] = json::array({"none"});
                         d["code_challenge_methods_supported"] = json::array({"S256"});
+                        d["acr_values_supported"] = json::array({"urn:snodec:acr:mfa"});
                         d["scopes_supported"] = json::array({"openid", "profile", "email"});
-                        d["claims_supported"] = json::array({"sub", "iss", "aud", "exp", "iat", "username", "email", "mfa_verified"});
+                        d["claims_supported"] =
+                            json::array({"sub", "iss", "aud", "exp", "iat", "username", "email", "mfa_verified", "acr"});
                         res->set("Content-Type", "application/json")
                             .set("Cache-Control", "public,max-age=3600")
                             .set("Access-Control-Allow-Origin", "*")

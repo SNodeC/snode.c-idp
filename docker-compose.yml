@@ -23,6 +23,7 @@ services:
       - DB_PATH=/app/data/auth.db
       # ── Security ────────────────────────────────────────────────────
       - TOTP_KEY_PATH=/app/keys/totp.key
+      # MFA is requested by the application authorization flow, not a container toggle.
       # Account return URLs are supplied by clients and checked against these callback origins.
       - IDP_CLIENTS=${IDP_CLIENTS:?Configure IDP_CLIENTS}
       # ── Federated Login (optional) ───────────────────────────────────

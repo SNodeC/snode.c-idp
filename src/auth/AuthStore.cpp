@@ -68,11 +68,14 @@ namespace snodec::auth {
                     challenge.size() == 43 && decodeBase64Url(challenge).size() == 32,
                 "Invalid authorization request");
         Json context = Json::object();
-        for (const auto* key : {"client_id", "redirect_uri", "state", "scope", "nonce", "code_challenge", "code_challenge_method"}) {
+        for (const auto* key :
+             {"client_id", "redirect_uri", "state", "scope", "nonce", "code_challenge", "code_challenge_method", "acr_values"}) {
             const auto value = input.value(key, std::string());
             require(value.size() <= 2048, "Authorization parameter too long");
             context[key] = value;
         }
+        require(context.at("acr_values") == "" || context.at("acr_values") == "urn:snodec:acr:mfa",
+                "Unsupported authentication requirement");
         std::istringstream scopes(context.at("scope").get<std::string>());
         std::string scope;
         while (scopes >> scope) {
@@ -120,11 +123,16 @@ namespace snodec::auth {
         if (context.contains("sid")) {
             require(active(context.at("sid"), userId, context.value("mfa_verified", mfaVerified)), "Session revoked");
         }
+        require(context.value("acr_values", std::string()) != "urn:snodec:acr:mfa" || mfaVerified, "MFA required by application");
         if (enrollment) {
             require(mfaVerified && context.value("enrollment", false) && context.contains("secret"), "Enrollment not authorized");
             execute("UPDATE user SET totp_secret=?,totp_enabled=1,activated=1 WHERE id=? AND totp_enabled=0",
                     {context.at("secret"), userId});
             require(db_.changedRows() == 1, "Enrollment already completed");
+            context.erase("sid");
+        }
+        if (context.contains("sid") && context.value("mfa_verified", mfaVerified) != mfaVerified) {
+            execute("DELETE FROM session WHERE id=?", {context.at("sid").get<std::string>()});
             context.erase("sid");
         }
         std::string token;

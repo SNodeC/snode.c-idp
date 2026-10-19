@@ -101,7 +101,8 @@ static void storeTests() {
     for (const auto& invalid : {Json{{"client_id", "other"}},
                                 Json{{"redirect_uri", "http://192.168.1.1/auth/callback"}},
                                 Json{{"code_challenge_method", "plain"}},
-                                Json{{"code_challenge", "bad"}}}) {
+                                Json{{"code_challenge", "bad"}},
+                                Json{{"acr_values", "unknown"}}}) {
         auto changed = request;
         changed.update(invalid);
         rejects([&] {
@@ -127,6 +128,34 @@ static void storeTests() {
     });
     rejects([&] {
         store.flow(randomToken());
+    });
+    auto required = request;
+    required["acr_values"] = "urn:snodec:acr:mfa";
+    auto requiredContext = store.authorization(required);
+    requiredContext["user_id"] = "1";
+    const auto weaker = store.complete(store.begin(proven), "1", false);
+    requiredContext["sid"] = weaker.at("sid");
+    requiredContext["mfa_verified"] = false;
+    const auto stepUp = store.begin(requiredContext);
+    rejects([&] {
+        store.complete(stepUp, "1", false);
+    });
+    require(store.flow(stepUp) == requiredContext && store.active(weaker.at("sid"), "1", false),
+            "Rejected completion changed session or transaction");
+    const auto stronger = store.complete(stepUp, "1", true);
+    require(stronger.at("sid") != weaker.at("sid") && !store.active(weaker.at("sid"), "1", false) &&
+                store.active(stronger.at("sid"), "1", true),
+            "Step-up did not replace the weaker session");
+    const auto requiredGrant = store.redeem({{"grant_type", "authorization_code"},
+                                             {"code", stronger.at("code")},
+                                             {"client_id", "app"},
+                                             {"redirect_uri", "https://app.example/callback"},
+                                             {"code_verifier", verifier}});
+    require(requiredGrant.at("acr_values") == "urn:snodec:acr:mfa" && requiredGrant.at("mfa_verified") == true &&
+                requiredGrant.at("nonce") == request.at("nonce") && requiredGrant.at("state") == request.at("state"),
+            "Step-up lost the authorization binding");
+    rejects([&] {
+        store.complete(store.begin(requiredContext), "1", true);
     });
     const auto completed = store.complete(pending, "1", true);
     rejects([&] {
@@ -497,6 +526,7 @@ static void tokenAndClientTests() {
     auto login = client->begin("/private?x=1");
     auto second = client->begin("//evil.example/");
     const auto authorization = form(login.authorizeUrl.substr(login.authorizeUrl.find('?') + 1));
+    require(authorization.at("acr_values") == "urn:snodec:acr:mfa", "Client did not request its required MFA assurance");
     bool called = false;
     client->complete(login.state, second.state, "code", [&](auto token, auto) {
         called = true;
@@ -515,6 +545,8 @@ static void tokenAndClientTests() {
             "PKCE context lost");
     claims.purpose = "id";
     claims.nonce = authorization.at("nonce");
+    require(verifiedJwt(signer.sign(claims), signer.publicKey()).at("acr") == "urn:snodec:acr:mfa",
+            "ID token did not report completed MFA assurance");
     auto finish = std::move(pending);
     finish({200, Json({{"access_token", access}, {"id_token", signer.sign(claims)}}).dump()});
     require(received == access && target == "/private?x=1", "Valid login failed");
@@ -617,6 +649,9 @@ static void tokenAndClientTests() {
     require(response->code == 401 && !pending, "Callback adapter accepted replay");
     claims.purpose = "access";
     claims.mfaVerified = false;
+    claims.purpose = "id";
+    require(!verifiedJwt(signer.sign(claims), signer.publicKey()).contains("acr"), "Password-only session claimed MFA assurance");
+    claims.purpose = "access";
     client->authorize(signer.sign(claims), [&](bool ok, auto) {
         accepted = ok;
     });

@@ -23,7 +23,7 @@ import threading
 import subprocess
 import time
 import traceback
-from urllib.parse import parse_qs, urlparse, urlencode
+from urllib.parse import parse_qs, urlparse, urlencode, urlunparse
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -177,6 +177,74 @@ def browser_flow(browser):
     page.wait_for_url(APP + "/private")
     assert page.locator("body").inner_text() == "MFA authorized"
     context.close()
+
+
+def mfa_enrollment_recovery(browser):
+    for scenario in ("existing-session", "fresh-login", "new-registration"):
+        context = browser.new_context()
+        page = context.new_page()
+        page.set_default_timeout(15000)
+        username = "recover-" + scenario
+        if scenario == "new-registration":
+            page.goto(APP + "/private")
+            page.get_by_role("link", name="Register", exact=True).click()
+        else:
+            page.goto(IDP + "/auth/register")
+        for name, value in [("username", username), ("email", username + "@example.test"),
+                            ("password", PASSWORD), ("confirm_password", PASSWORD)]:
+            page.locator("[name=" + name + "]").fill(value)
+        page.locator("[name=enable_mfa]").uncheck()
+        page.get_by_role("button", name="Register", exact=True).click()
+        if scenario != "new-registration":
+            page.wait_for_url(IDP + "/dashboard")
+            page.goto(IDP + "/settings")
+            assert page.locator("a[href^='/auth/enroll/totp']").is_visible()
+            if scenario == "fresh-login":
+                page.goto(IDP + "/auth/logout")
+                page.get_by_role("button", name="Sign out", exact=True).click()
+            page.goto(APP + "/private")
+            if scenario == "fresh-login":
+                page.locator("[name=username]").fill(username)
+                page.locator("[name=password]").fill(PASSWORD)
+                page.get_by_role("button", name="Sign in", exact=True).click()
+        page.wait_for_url(IDP + "/auth/enroll/totp")
+        assert "This application requires two-factor authentication" in page.locator("body").inner_text()
+        assert page.get_by_role("button", name="Skip", exact=True).count() == 0
+        transaction = page.locator("[name=transaction]").input_value()
+        secret = next(p.strip() for p in page.locator("p").all_text_contents()
+                      if re.fullmatch("[A-Z2-7]{16,}", p.strip()))
+        for path, data, expected in [
+            ("/auth/enroll/totp/skip", {"transaction": transaction}, 400),
+            ("/auth/enroll/totp/verify", {"transaction": transaction, "code": "invalid"}, 401),
+        ]:
+            status = page.evaluate("""async ([path, data]) => {
+                const response = await fetch(path, {method: 'POST', body: new URLSearchParams(data)});
+                return response.status;
+            }""", [path, data])
+            assert status == expected, "Required MFA accepted a skip or invalid code"
+        assert not any(c["name"] == "access_token" for c in context.cookies(APP))
+        page.locator("[name=code]").fill(totp(secret))
+        page.get_by_role("button", name="Activate", exact=True).click()
+        page.wait_for_url(APP + "/private")
+        assert page.locator("body").inner_text() == "MFA authorized"
+        page.goto(APP + "/private")
+        assert page.locator("body").inner_text() == "MFA authorized"
+        context.close()
+
+
+def optional_enrollment():
+    session, _ = registration("optional-enrollment", mfa=False)
+    page = session.get(IDP + "/auth/enroll/totp", timeout=15)
+    assert "<button>Skip</button>" in page.text
+    response = post(session, "/auth/enroll/totp/skip", {"transaction": reference(page)})
+    assert response.status_code == 302 and response.headers["Location"] == "/dashboard"
+    page = session.get(IDP + "/auth/enroll/totp", timeout=15)
+    secret = re.search(r"<p>([A-Z2-7]{16,})</p>", page.text)[1]
+    response = post(session, "/auth/enroll/totp/verify",
+                    {"transaction": reference(page), "code": totp(secret)})
+    assert response.status_code == 302 and response.headers["Location"] == "/dashboard"
+    response = session.get(APP + "/private", timeout=15)
+    assert response.status_code == 200 and response.text == "MFA authorized"
 
 
 def account_navigation(browser):
@@ -446,7 +514,13 @@ def password_and_mfa():
         headers={"Authorization": "Bearer " + token(session)},
         timeout=15,
     ).json()["sub"]
-    single, _ = registration("password-only", mfa=False, oauth=True)
+    single, _ = registration("password-only", mfa=False)
+    response = single.get(APP + "/private", allow_redirects=False, timeout=15)
+    authorization = urlparse(response.headers["Location"])
+    parameters = parse_qs(authorization.query)
+    del parameters["acr_values"]
+    response = single.get(urlunparse(authorization._replace(query=urlencode(parameters, doseq=True))), timeout=15)
+    assert response.status_code == 401, "Client accepted a password-only grant without its requested assurance"
     assert not any(
         c.name == "access_token" for c in single.cookies
     ), "Rejected password-only cookie retained"
@@ -927,6 +1001,8 @@ def main():
                 ("account return navigation and tab isolation", lambda: account_navigation(browser)),
                 ("pending OAuth and account navigation conflicts", account_flow_conflicts),
                 ("password and MFA login", password_and_mfa),
+                ("MFA enrollment recovery", lambda: mfa_enrollment_recovery(browser)),
+                ("optional profile enrollment and skip", optional_enrollment),
                 (
                     "reset and account-security revocation",
                     lambda: reset_and_security_changes(root),
