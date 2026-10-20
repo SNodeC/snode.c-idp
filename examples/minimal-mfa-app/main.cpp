@@ -39,6 +39,16 @@ int main(int argc, char** argv) {
     });
     app.use("/private", auth);
     app.use("/private", express::middleware::StaticMiddleware("pages/private"));
+    app.get("/", [client] APPLICATION(req, res) {
+        client->authorize(req->cookie("access_token"), [res](bool accepted, const auto&) {
+            res->set("Cache-Control", "no-store");
+            if (accepted) {
+                res->redirect(303, "/private");
+            } else {
+                res->redirect(303, "/index.html");
+            }
+        });
+    });
     app.use(express::middleware::StaticMiddleware("public"));
     const auto serve = [port](const auto& server) {
         server.listen(static_cast<uint16_t>(port), [](const auto&, const auto&) {
