@@ -302,8 +302,15 @@ int main(int argc, char** argv) {
     app.get("/private", [] APPLICATION(req, res) {
         res->set("Content-Type", "text/plain").send("Authenticated with MFA\n");
     });
-    app.get("/", [] APPLICATION(req, res) {
-        res->send("<a href='/private'>Sign in with MFA</a>");
+    app.get("/", [client] APPLICATION(req, res) {
+        client->authorize(req->cookie("access_token"), [res](bool accepted, const auto&) {
+            res->set("Cache-Control", "no-store");
+            if (accepted) {
+                res->redirect(303, "/private");
+            } else {
+                res->send("<a href='/private'>Sign in with MFA</a>");
+            }
+        });
     });
     app.listen(8081, [](const auto&, const auto&) {});
     return core::SNodeC::start();

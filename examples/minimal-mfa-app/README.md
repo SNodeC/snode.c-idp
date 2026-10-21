@@ -33,7 +33,7 @@ export IDP_PUBLIC_KEY_PATH=/absolute/path/to/idp-public.pem
   MinimalMfaApp local --host 127.0.0.1
 ```
 
-Open `http://localhost:8084/` and choose **Sign in with MFA**. The local IDP must register client `minimal-mfa-app` with callback `http://localhost:8084/auth/callback`. See the [local walkthrough](../../docs/local-deployment.md#banner) for account creation, enrollment, recovery and logout.
+Open `http://localhost:8084/`. A valid application session redirects to `/private`; otherwise the landing page offers **Sign in with MFA**. The check validates both the token and the live IDP session. The local IDP must register client `minimal-mfa-app` with callback `http://localhost:8084/auth/callback`. See the [local walkthrough](../../docs/local-deployment.md#banner) for account creation, enrollment, recovery and logout.
 
 ## Configuration
 

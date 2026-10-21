@@ -1,10 +1,12 @@
 """Explicit direct-TLS checks using the actual packaged IDP and example executables."""
 import argparse
+import base64
 from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -44,7 +46,7 @@ def main():
         IDP_CLIENTS=json.dumps({'live-app': [app + '/auth/callback']}),
         APP_CLIENT_ID='live-app', APP_CALLBACK_URL=app + '/auth/callback', APP_PORT=str(app_port),
         SMTP_COMMAND='', OAUTH_GOOGLE_CLIENT_ID='', OAUTH_GOOGLE_CLIENT_SECRET='',
-        XDG_CONFIG_HOME=str(root / 'config'), XDG_STATE_HOME=str(root / 'state'))
+        SSL_CERT_FILE=str(root / 'tls.pem'), XDG_CONFIG_HOME=str(root / 'config'), XDG_STATE_HOME=str(root / 'state'))
     context = ssl.create_default_context(cafile=str(root / 'tls.pem'))
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -90,9 +92,38 @@ def main():
         subprocess.run(['sh', str(Path(__file__).resolve().parents[1] / 'scripts/healthcheck.sh')],
                        env=env | {'CURL_CA_BUNDLE': str(root / 'tls.pem')}, capture_output=True, check=True)
         with get(app + '/') as response:
-            assert response.status == 308 and response.headers['Location'] == '/index.html'
+            assert response.status == 303 and response.headers['Location'] == '/index.html'
         with get(app + '/index.html') as response:
             assert response.status == 200
+        # Use disposable signed tokens and live IDP session rows to exercise the real example.
+        with sqlite3.connect(root / 'auth.db') as db:
+            user = db.execute("INSERT INTO user(username,email,password_hash,password_salt) VALUES(?,?,?,?)",
+                              ('home-test', 'home@example.test', 'unused', '')).lastrowid
+            session = db.execute("INSERT INTO session(token,user_id,mfa_verified,expires_at) "
+                                 "VALUES(?,?,1,datetime('now','+1 hour'))", ('home-session', user)).lastrowid
+        def token(expiry, mfa=True):
+            encode = lambda value: base64.urlsafe_b64encode(value).rstrip(b'=')
+            now = int(time.time())
+            claims = dict(iss=idp, aud='live-app', sub=str(user), sid=str(session), exp=expiry,
+                          iat=now, nbf=now, scope=[], mfa_verified=mfa, token_use='access')
+            unsigned = encode(b'{"alg":"RS256","typ":"at+jwt"}') + b'.' + encode(json.dumps(claims).encode())
+            signature = subprocess.run(['openssl', 'dgst', '-sha256', '-sign', str(root / 'signing.pem')],
+                                       input=unsigned, capture_output=True, check=True).stdout
+            return (unsigned + b'.' + encode(signature)).decode()
+        active = token(int(time.time()) + 300)
+        with get(app + '/', {'Cookie': 'access_token=' + active}) as response:
+            assert response.status == 303 and response.headers['Location'] == '/private'
+            assert response.headers['Cache-Control'] == 'no-store'
+        with get(app + '/private', {'Cookie': 'access_token=' + active}) as response:
+            assert response.status in (200, 308)
+        for rejected in ['invalid', token(int(time.time()) - 1), token(int(time.time()) + 300, False)]:
+            with get(app + '/', {'Cookie': 'access_token=' + rejected}) as response:
+                assert response.status == 303 and response.headers['Location'] == '/index.html'
+                assert response.headers['Cache-Control'] == 'no-store'
+        with sqlite3.connect(root / 'auth.db') as db:
+            db.execute('DELETE FROM session WHERE id=?', (session,))
+        with get(app + '/', {'Cookie': 'access_token=' + active}) as response:
+            assert response.status == 303 and response.headers['Location'] == '/index.html'
         with get(app + '/private') as response:
             assert response.status in (302, 303)
             assert response.headers['Location'].startswith(idp + '/oauth2/authorize?')

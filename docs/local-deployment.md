@@ -348,7 +348,7 @@ in the affected terminal before starting the process.
 
 ## 7. Create your first account and enter the application
 
-1. Open **http://localhost:8081/** in your browser.
+1. Open **http://localhost:8081/** in your browser. If you already have a valid application session, the example redirects to `/private`; otherwise it shows the sign-in page.
 2. Click **Sign in with MFA**. `/private` redirects to the IDP login page.
 3. Follow **Register** from that page, preserving the application login flow.
 4. Choose a unique username (3–64 characters), a unique email address (at most
