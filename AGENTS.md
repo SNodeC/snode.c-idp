@@ -95,3 +95,9 @@ The shell bootstrap delegates interactive configuration and provisioning to this
 The bootstrap downloads deploy.py by its pinned Git blob ID. Whenever that helper changes, update helper_blob in the shell script with `git hash-object scripts/deploy.py`; deployment tests verify the pin. Users download and execute only the shell script.
 
 Public deployment uses direct TLS listeners selected by configured HTTPS origins. Keep listener ports, Google/application callbacks and HTTP redirect targets derived from the sole deployment JSON. Packaged units use IPv4 and systemd TLS credentials; Certbot standalone briefly stops/starts the IDP for port 80. Do not reintroduce a proxy dependency or proxy configuration generation.
+
+## Repository-owned package CI
+
+`ci/packages.json` owns targets, dependency names and source build hooks. The coordinator master contains registration and policy overrides only. Temporary task checkouts use `/tmp/codex/checkouts/snode.c-idp/<task>`; remove only after uncommitted work is preserved. Temporary checks use `/tmp/codex/build/snode.c-idp/<task>`. Existing persistent layout rules above remain authoritative. Shared formatting settings match the canonical baseline; the C++ discovery module retains tests/examples and excludes third-party `src/supplement`, build and checkout paths.
+
+This task uses `/tmp/codex/checkouts/snode.c-idp/repository-owned-package-ci` on `refactor/repository-owned-package-ci` for isolated CI changes, preserving the occupied canonical checkout. Retain it until its uncommitted changes are integrated or otherwise preserved. Local package-CI fixture checks/logs use `/tmp/codex/build/snodec/package-ci`; no product installation or live activation is authorized.
