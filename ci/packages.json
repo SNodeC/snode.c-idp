@@ -1,0 +1,23 @@
+{
+  "title": "SNode.C IDP",
+  "package": "snodec-idp",
+  "depends_on": ["snode.c"],
+  "build": {"native": "ci/package/native.sh"},
+  "matrix": {
+    "linux": [
+      {"distribution": "debian", "suite": "trixie", "image": "debian:trixie", "architectures": ["amd64", "arm64", "armhf", "riscv64"]},
+      {"distribution": "debian", "suite": "forky", "image": "debian:forky", "architectures": ["amd64", "arm64", "armhf", "riscv64"]},
+      {"distribution": "debian", "suite": "sid", "image": "debian:sid", "architectures": ["amd64", "arm64", "armhf", "riscv64"]},
+      {"distribution": "ubuntu", "suite": "noble", "image": "ubuntu:noble", "architectures": ["amd64", "arm64"]},
+      {"distribution": "ubuntu", "suite": "resolute", "image": "ubuntu:resolute", "architectures": ["amd64", "arm64"]},
+      {"distribution": "rocky", "suite": "9", "image": "rockylinux/rockylinux:9", "architectures": ["x86_64", "aarch64"]},
+      {"distribution": "rocky", "suite": "10", "image": "rockylinux/rockylinux:10", "architectures": ["x86_64", "aarch64"]},
+      {"distribution": "fedora", "suite": "43", "image": "fedora:43", "architectures": ["x86_64", "aarch64"]},
+      {"distribution": "fedora", "suite": "44", "image": "fedora:44", "architectures": ["x86_64", "aarch64"]}
+    ],
+    "raspberrypi": {
+      "bookworm": {"url": "https://downloads.raspberrypi.com/raspios_oldstable_lite_arm64/images/raspios_oldstable_lite_arm64-2026-09-15/2026-09-15-raspios-bookworm-arm64-lite.img.xz", "sha256": "bcaefdf9c40dbed31dcaeb3b8494e498b4f1e3078c2604b0d9f5f595f8f6fd91"},
+      "trixie": {"url": "https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-09-15/2026-09-15-raspios-trixie-arm64-lite.img.xz", "sha256": "cdf4f3bfac35ae947b46e4e767f935453810549779ac3290e05a6754aee627e5"}
+    }
+  }
+}

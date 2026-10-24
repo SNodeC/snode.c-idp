@@ -66,3 +66,11 @@ Follow the [repository development conventions](AGENTS.md) for dependency discov
 ## License
 
 MIT — Copyright © 2025/2026 Jan Nicolas Eberwein & Volker Chr. (SNode.C). See individual source files for their notices.
+
+## Distribution package CI
+
+This repository owns its full matrix, `depends_on`, package namespace and hook paths in [`ci/packages.json`](ci/packages.json), with product commands under `ci/package/`. A created or moved strict `vMAJOR.MINOR.PATCH` tag transmits the exact source and full JSON. Its first valid notification activates this allowed repository in DistributionPackages; a failed build keeps activation. The tag commit must contain the integration and a matching root `VERSION`. Ordinary branch pushes do not start package CI.
+
+A direct release builds that exact tag, including an older supported version. A prerequisite-triggered chain selects this active repository's highest semantic-version tag, per matching target. Missing published prerequisites fail the affected direct rows; they are never built implicitly. Successful prerequisite publication later admits a highest-tag cascade. Status pages show only the highest version; older direct bug-fix builds still sign/publish without replacing that display.
+
+The wrapper builds unsigned packages from captured source hooks and reports the real source job/artifact identity. DP verifies, signs and publishes centrally. Only the separated notify/capture-reader credentials belong here; signing keys and feed-write authority remain in DP. Both notification and build jobs need the coordinator reader for private-coordinator checkout. See [setup/onboarding](https://github.com/SNodeC/DistributionPackages/blob/main/docs/setup.md#banner) and [orchestration/recovery](https://github.com/SNodeC/DistributionPackages/blob/main/docs/ci-orchestration.md#banner).
