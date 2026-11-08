@@ -15,7 +15,7 @@ build=/work/build-product
 cmake -S "$SOURCE_DIR" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR="$libdir" -DCMAKE_INSTALL_SYSCONFDIR=/etc \
-    -DAUTH_BUILD_EXAMPLE=ON -DCMAKE_CXX_FLAGS=-Werror -DAUTH_REVISION="$SOURCE_COMMIT"
+    -DAUTH_BUILD_EXAMPLE=ON -DCMAKE_CXX_FLAGS=-Werror -DAUTH_REVISION="$SOURCE_TAG"
 cmake --build "$build" --parallel 2
 ctest --test-dir "$build" --output-on-failure --output-junit core-ci-tests.xml
 python3 /tool/native_container.py --package "$build"
@@ -25,5 +25,5 @@ export LD_LIBRARY_PATH="/work/installed/usr/$libdir${LD_LIBRARY_PATH:+:$LD_LIBRA
 cmake -S "$SOURCE_DIR/tests/live" -B /work/build-consumer -G Ninja
 cmake --build /work/build-consumer --parallel 2
 cmake -S "$SOURCE_DIR" -B /work/build-client -G Ninja \
-    -DAUTH_CLIENT_ONLY=ON -DCMAKE_CXX_FLAGS=-Werror -DAUTH_REVISION="$SOURCE_COMMIT"
+    -DAUTH_CLIENT_ONLY=ON -DCMAKE_CXX_FLAGS=-Werror -DAUTH_REVISION="$SOURCE_TAG"
 cmake --build /work/build-client --parallel 2
