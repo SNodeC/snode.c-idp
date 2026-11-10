@@ -386,8 +386,13 @@ algorithm, signature, issuer, audience, typed times, or missing session identity
 Use the middleware for authorization. `OAuthClient` accepts an injectable
 `HttpExchange` for offline tests; production uses the shipped SNode.C transport.
 
-The access cookie is named `access_token`, HttpOnly, SameSite=Lax, and Secure on
-HTTPS. It expires after five minutes. This minimal browser adapter does not
+The access cookie defaults to `access_token`, HttpOnly, SameSite=Lax, and Secure
+on HTTPS, with a five-minute lifetime. The optional `OAuthClient` constructor
+arguments after `HttpExchange` configure its name and lifetime in seconds, for
+example `httpExchange, "coreci_access_token", 43200`. Both middleware adapters and
+the callback use this one configuration; callers reading the cookie directly use
+`client->cookieName()`. Empty or invalid cookie names and zero lifetimes are rejected.
+The example, environment and Compose defaults remain unchanged. This minimal browser adapter does not
 silently refresh; the IDP can reauthorize an existing session on the next login.
 The token endpoint supports rotating refresh tokens for separately implemented
 clients; those clients must retain and replace each refresh token securely.

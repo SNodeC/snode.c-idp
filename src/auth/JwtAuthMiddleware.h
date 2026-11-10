@@ -55,7 +55,7 @@ namespace snodec::auth::middleware {
         template <typename Request, typename Response, typename Next>
         void operator()(Request req, Response res, Next next) {
             const std::string header = req->get("Authorization");
-            const auto token = header.starts_with("Bearer ") ? header.substr(7) : req->cookie("access_token");
+            const auto token = header.starts_with("Bearer ") ? header.substr(7) : req->cookie(client_->cookieName());
             if (!header.starts_with("Bearer ") && !client_->cookieRequestAllowed(req->method, req->get("Origin"))) {
                 res->status(403).send("Untrusted request origin");
             } else {
@@ -69,13 +69,13 @@ namespace snodec::auth::middleware {
                         req->template setAttribute<bool>(claims.mfaVerified, "X-MfaVerified");
                         next();
                     } else if (!header.empty() || (req->method != "GET" && req->method != "HEAD")) {
-                        res->set("Set-Cookie", client->cookie("access_token", "", 0));
+                        res->set("Set-Cookie", client->cookie(client->cookieName(), "", 0));
                         res->status(401).send("Unauthorized");
                     } else {
                         try {
                             const auto login = client->begin(req->originalUrl);
                             res->set("Set-Cookie", client->cookie("oauth_" + login.state, login.state, 600));
-                            res->cookie("access_token", "", {{"Path", "/"}, {"Max-Age", "0"}}).redirect(login.authorizeUrl);
+                            res->cookie(client->cookieName(), "", {{"Path", "/"}, {"Max-Age", "0"}}).redirect(login.authorizeUrl);
                         } catch (const std::exception&) {
                             res->status(503).send("Authentication unavailable");
                         }

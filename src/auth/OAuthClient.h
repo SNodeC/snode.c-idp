@@ -8,8 +8,13 @@
 namespace snodec::auth {
     class OAuthClient {
     public:
-        OAuthClient(
-            std::string issuer, std::string clientId, std::string callbackUrl, std::string publicKey, HttpExchange exchange = httpExchange);
+        OAuthClient(std::string issuer,
+                    std::string clientId,
+                    std::string callbackUrl,
+                    std::string publicKey,
+                    HttpExchange exchange = httpExchange,
+                    std::string cookieName = "access_token",
+                    unsigned cookieLifetime = 300);
         struct Login {
             std::string state;
             std::string authorizeUrl;
@@ -22,6 +27,8 @@ namespace snodec::auth {
                       std::function<void(std::string, std::string)> done);
         void authorize(const std::string& token, std::function<void(bool, JwtClaims)> done);
         std::string cookie(const std::string& name, const std::string& value, unsigned seconds) const;
+        const std::string& cookieName() const;
+        unsigned cookieLifetime() const;
         bool cookieRequestAllowed(const std::string& method, const std::string& origin) const;
 
     private:
@@ -32,6 +39,8 @@ namespace snodec::auth {
         std::string issuer_, clientId_, callbackUrl_;
         JwtVerifier verifier_;
         HttpExchange exchange_;
+        std::string cookieName_;
+        unsigned cookieLifetime_;
         std::map<std::string, Transaction> transactions_;
     };
 } // namespace snodec::auth

@@ -59,7 +59,7 @@ namespace snodec::auth::callback {
                         res->status(401).send("Login failed; start a new login");
                     } else {
                         res->cookie("oauth_" + state, "", {{"Path", "/"}, {"Max-Age", "0"}, {"HttpOnly", ""}});
-                        res->set("Set-Cookie", client->cookie("access_token", token, 300));
+                        res->set("Set-Cookie", client->cookie(client->cookieName(), token, client->cookieLifetime()));
                         res->redirect(target);
                     }
                 });

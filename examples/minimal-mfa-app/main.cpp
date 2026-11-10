@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     app.use("/private", auth);
     app.use("/private", express::middleware::StaticMiddleware("pages/private"));
     app.get("/", [client] APPLICATION(req, res) {
-        client->authorize(req->cookie("access_token"), [res](bool accepted, const auto&) {
+        client->authorize(req->cookie(client->cookieName()), [res](bool accepted, const auto&) {
             res->set("Cache-Control", "no-store");
             if (accepted) {
                 res->redirect(303, "/private");
