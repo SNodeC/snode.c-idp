@@ -10,348 +10,82 @@
   },
   "matrix": [
     {
-      "id": "debian-trixie-amd64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "trixie",
-      "arch": "amd64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:trixie",
-        "platform": "linux/amd64",
-        "format": "deb"
-      }
+      "id": "debian-trixie-amd64"
     },
     {
-      "id": "debian-trixie-arm64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "trixie",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "debian:trixie",
-        "platform": "linux/arm64",
-        "format": "deb"
-      }
+      "id": "debian-trixie-arm64"
     },
     {
-      "id": "debian-trixie-armhf",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "trixie",
-      "arch": "armhf",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:trixie",
-        "platform": "linux/arm/v7",
-        "format": "deb"
-      }
+      "id": "debian-trixie-armhf"
     },
     {
-      "id": "debian-trixie-riscv64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "trixie",
-      "arch": "riscv64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:trixie",
-        "platform": "linux/riscv64",
-        "format": "deb"
-      }
+      "id": "debian-trixie-riscv64"
     },
     {
-      "id": "debian-forky-amd64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "forky",
-      "arch": "amd64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:forky",
-        "platform": "linux/amd64",
-        "format": "deb"
-      }
+      "id": "debian-forky-amd64"
     },
     {
-      "id": "debian-forky-arm64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "forky",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "debian:forky",
-        "platform": "linux/arm64",
-        "format": "deb"
-      }
+      "id": "debian-forky-arm64"
     },
     {
-      "id": "debian-forky-armhf",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "forky",
-      "arch": "armhf",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:forky",
-        "platform": "linux/arm/v7",
-        "format": "deb"
-      }
+      "id": "debian-forky-armhf"
     },
     {
-      "id": "debian-forky-riscv64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "forky",
-      "arch": "riscv64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:forky",
-        "platform": "linux/riscv64",
-        "format": "deb"
-      }
+      "id": "debian-forky-riscv64"
     },
     {
-      "id": "debian-sid-amd64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "sid",
-      "arch": "amd64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:sid",
-        "platform": "linux/amd64",
-        "format": "deb"
-      }
+      "id": "debian-sid-amd64"
     },
     {
-      "id": "debian-sid-arm64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "sid",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "debian:sid",
-        "platform": "linux/arm64",
-        "format": "deb"
-      }
+      "id": "debian-sid-arm64"
     },
     {
-      "id": "debian-sid-armhf",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "sid",
-      "arch": "armhf",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:sid",
-        "platform": "linux/arm/v7",
-        "format": "deb"
-      }
+      "id": "debian-sid-armhf"
     },
     {
-      "id": "debian-sid-riscv64",
-      "family": "native",
-      "distribution": "debian",
-      "suite": "sid",
-      "arch": "riscv64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "debian:sid",
-        "platform": "linux/riscv64",
-        "format": "deb"
-      }
+      "id": "debian-sid-riscv64"
     },
     {
-      "id": "ubuntu-noble-amd64",
-      "family": "native",
-      "distribution": "ubuntu",
-      "suite": "noble",
-      "arch": "amd64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "ubuntu:noble",
-        "platform": "linux/amd64",
-        "format": "deb"
-      }
+      "id": "ubuntu-noble-amd64"
     },
     {
-      "id": "ubuntu-noble-arm64",
-      "family": "native",
-      "distribution": "ubuntu",
-      "suite": "noble",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "ubuntu:noble",
-        "platform": "linux/arm64",
-        "format": "deb"
-      }
+      "id": "ubuntu-noble-arm64"
     },
     {
-      "id": "ubuntu-resolute-amd64",
-      "family": "native",
-      "distribution": "ubuntu",
-      "suite": "resolute",
-      "arch": "amd64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "ubuntu:resolute",
-        "platform": "linux/amd64",
-        "format": "deb"
-      }
+      "id": "ubuntu-resolute-amd64"
     },
     {
-      "id": "ubuntu-resolute-arm64",
-      "family": "native",
-      "distribution": "ubuntu",
-      "suite": "resolute",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "ubuntu:resolute",
-        "platform": "linux/arm64",
-        "format": "deb"
-      }
+      "id": "ubuntu-resolute-arm64"
     },
     {
-      "id": "rocky-9-x86_64",
-      "family": "native",
-      "distribution": "rocky",
-      "suite": "9",
-      "arch": "x86_64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "rockylinux/rockylinux:9",
-        "platform": "linux/amd64",
-        "format": "rpm",
-        "dependencies": [
-          "gcc-toolset-14-gcc-c++"
-        ]
-      }
+      "id": "rocky-9-x86_64"
     },
     {
-      "id": "rocky-9-aarch64",
-      "family": "native",
-      "distribution": "rocky",
-      "suite": "9",
-      "arch": "aarch64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "rockylinux/rockylinux:9",
-        "platform": "linux/arm64",
-        "format": "rpm",
-        "dependencies": [
-          "gcc-toolset-14-gcc-c++"
-        ]
-      }
+      "id": "rocky-9-aarch64"
     },
     {
-      "id": "rocky-10-x86_64",
-      "family": "native",
-      "distribution": "rocky",
-      "suite": "10",
-      "arch": "x86_64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "rockylinux/rockylinux:10",
-        "platform": "linux/amd64",
-        "format": "rpm"
-      }
+      "id": "rocky-10-x86_64"
     },
     {
-      "id": "rocky-10-aarch64",
-      "family": "native",
-      "distribution": "rocky",
-      "suite": "10",
-      "arch": "aarch64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "rockylinux/rockylinux:10",
-        "platform": "linux/arm64",
-        "format": "rpm"
-      }
+      "id": "rocky-10-aarch64"
     },
     {
-      "id": "fedora-43-x86_64",
-      "family": "native",
-      "distribution": "fedora",
-      "suite": "43",
-      "arch": "x86_64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "fedora:43",
-        "platform": "linux/amd64",
-        "format": "rpm"
-      }
+      "id": "fedora-43-x86_64"
     },
     {
-      "id": "fedora-43-aarch64",
-      "family": "native",
-      "distribution": "fedora",
-      "suite": "43",
-      "arch": "aarch64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "fedora:43",
-        "platform": "linux/arm64",
-        "format": "rpm"
-      }
+      "id": "fedora-43-aarch64"
     },
     {
-      "id": "fedora-44-x86_64",
-      "family": "native",
-      "distribution": "fedora",
-      "suite": "44",
-      "arch": "x86_64",
-      "runner": "ubuntu-24.04",
-      "build": {
-        "image": "fedora:44",
-        "platform": "linux/amd64",
-        "format": "rpm"
-      }
+      "id": "fedora-44-x86_64"
     },
     {
-      "id": "fedora-44-aarch64",
-      "family": "native",
-      "distribution": "fedora",
-      "suite": "44",
-      "arch": "aarch64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "image": "fedora:44",
-        "platform": "linux/arm64",
-        "format": "rpm"
-      }
+      "id": "fedora-44-aarch64"
     },
     {
-      "id": "raspberrypios-bookworm-arm64",
-      "family": "native",
-      "distribution": "raspberrypios",
-      "suite": "bookworm",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "platform": "linux/arm64",
-        "format": "deb",
-        "image": "ghcr.io/snodec/raspberrypios-bookworm@sha256:31d641c002dae546612df0b9df7cb3b8e160cf26b15a438292da036612339d3a"
-      }
+      "id": "raspberrypios-bookworm-arm64"
     },
     {
-      "id": "raspberrypios-trixie-arm64",
-      "family": "native",
-      "distribution": "raspberrypios",
-      "suite": "trixie",
-      "arch": "arm64",
-      "runner": "ubuntu-24.04-arm",
-      "build": {
-        "platform": "linux/arm64",
-        "format": "deb",
-        "image": "ghcr.io/snodec/raspberrypios-trixie@sha256:32f55705a349e55959141cad29f8fdcb99323734adc4ee35599919e7f831dc54"
-      }
+      "id": "raspberrypios-trixie-arm64"
     }
   ],
   "build_dependencies": {
