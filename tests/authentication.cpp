@@ -520,6 +520,8 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
     };
     auto client = std::make_shared<OAuthClient>(
         "https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport, cookieName, cookieLifetime);
+    const OAuthClient defaults("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport);
+    require(defaults.cookieName() == "access_token" && defaults.cookieLifetime() == 300, "Existing client defaults changed");
     require(client->cookieName() == cookieName && client->cookieLifetime() == cookieLifetime, "Cookie settings lost");
     for (const auto& bad : {"", "bad name", "x;Path=/", "x\r\nSet-Cookie:y"}) {
         rejects([&] {
