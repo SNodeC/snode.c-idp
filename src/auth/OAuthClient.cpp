@@ -1,13 +1,25 @@
 #include "OAuthClient.h"
 
 namespace snodec::auth {
-    OAuthClient::OAuthClient(
-        std::string issuer, std::string clientId, std::string callbackUrl, std::string publicKey, HttpExchange exchange)
+    OAuthClient::OAuthClient(std::string issuer,
+                             std::string clientId,
+                             std::string callbackUrl,
+                             std::string publicKey,
+                             HttpExchange exchange,
+                             std::string cookieName,
+                             unsigned cookieLifetime)
         : issuer_(std::move(issuer))
         , clientId_(std::move(clientId))
         , callbackUrl_(std::move(callbackUrl))
         , verifier_(issuer_, clientId_, publicKey)
-        , exchange_(std::move(exchange)) {
+        , exchange_(std::move(exchange))
+        , cookieName_(std::move(cookieName))
+        , cookieLifetime_(cookieLifetime) {
+        require(!cookieName_.empty() &&
+                    cookieName_.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~") ==
+                        std::string::npos,
+                "Invalid access cookie name");
+        require(cookieLifetime_ > 0, "Invalid access cookie lifetime");
         require(!issuer_.empty() && !clientId_.empty() && !callbackUrl_.empty(), "Missing OAuth configuration");
         endpoint(callbackUrl_);
         require(endpoint(issuer_).origin == issuer_, "Issuer must be an origin without trailing slash");
@@ -110,6 +122,14 @@ namespace snodec::auth {
     std::string OAuthClient::cookie(const std::string& name, const std::string& value, unsigned seconds) const {
         return name + "=" + value + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + std::to_string(seconds) +
                (callbackUrl_.starts_with("https://") ? "; Secure" : "");
+    }
+
+    const std::string& OAuthClient::cookieName() const {
+        return cookieName_;
+    }
+
+    unsigned OAuthClient::cookieLifetime() const {
+        return cookieLifetime_;
     }
 
     bool OAuthClient::cookieRequestAllowed(const std::string& method, const std::string& origin) const {

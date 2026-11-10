@@ -15,7 +15,7 @@ namespace snodec {
         AuthMiddleware::handler() {
             return [client = client_] MIDDLEWARE(req, res, next) {
                 const auto header = req->get("Authorization");
-                const auto token = header.starts_with("Bearer ") ? header.substr(7) : req->cookie("access_token");
+                const auto token = header.starts_with("Bearer ") ? header.substr(7) : req->cookie(client->cookieName());
                 if (!header.starts_with("Bearer ") && !client->cookieRequestAllowed(req->method, req->get("Origin"))) {
                     res->status(403).send("Untrusted request origin");
                 } else {

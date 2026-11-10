@@ -459,7 +459,7 @@ struct TestResponse {
     }
 };
 
-static void tokenAndClientTests() {
+static void tokenAndClientTests(const std::string& cookieName = "access_token", unsigned cookieLifetime = 300) {
     require(formEncode(Json::object()).empty(), "Empty form must stay empty");
     require(formEncode(Json{{"a&=", "x+y z"}, {"empty", ""}}) == "a%26%3D=x%2By%20z&empty=", "Form escaping or separators changed");
     rejects(
@@ -518,8 +518,19 @@ static void tokenAndClientTests() {
         posted = body;
         pending = std::move(done);
     };
-    auto client =
-        std::make_shared<OAuthClient>("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport);
+    auto client = std::make_shared<OAuthClient>(
+        "https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport, cookieName, cookieLifetime);
+    const OAuthClient defaults("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport);
+    require(defaults.cookieName() == "access_token" && defaults.cookieLifetime() == 300, "Existing client defaults changed");
+    require(client->cookieName() == cookieName && client->cookieLifetime() == cookieLifetime, "Cookie settings lost");
+    for (const auto& bad : {"", "bad name", "x;Path=/", "x\r\nSet-Cookie:y"}) {
+        rejects([&] {
+            OAuthClient invalid("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport, bad);
+        });
+    }
+    rejects([&] {
+        OAuthClient invalid("https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport, "token", 0);
+    });
     const auto account = client->accountUrl("/private?x=1&next=%2Fhome");
     const auto navigation = form(account.substr(account.find('?') + 1));
     require(account.starts_with("https://idp.example/settings?") && navigation.at("client_id") == "app" &&
@@ -597,7 +608,7 @@ static void tokenAndClientTests() {
     request->method = "GET";
     request->url = "/";
     request->originalUrl = "/private";
-    request->cookies["access_token"] = access;
+    request->cookies[cookieName] = access;
     auto response = std::make_shared<TestResponse>();
     bool next = false;
     middleware(request, response, [&] {
@@ -613,7 +624,7 @@ static void tokenAndClientTests() {
     finish = std::move(pending);
     finish({200, R"({"active":false})"});
     require(!next && response->code == 302 && response->location.starts_with("https://idp.example/oauth2/authorize?") &&
-                response->cookies.contains("access_token") && response->cookies.at("access_token").empty(),
+                response->cookies.contains(cookieName) && response->cookies.at(cookieName).empty(),
             "Revoked browser session did not restart login and clear the cookie");
     request->method = "POST";
     requestBase->headers["authorization"] = "Basic bogus";
@@ -648,9 +659,12 @@ static void tokenAndClientTests() {
     claims.nonce = callbackParameters.at("nonce");
     finish = std::move(pending);
     finish({200, Json({{"access_token", access}, {"id_token", signer.sign(claims)}}).dump()});
-    require(response->location == "/private" && response->headers.at("Set-Cookie").find("access_token=" + access) == 0 &&
+    require(response->location == "/private" && response->headers.at("Set-Cookie").find(cookieName + "=" + access) == 0 &&
                 response->cookies.at("oauth_" + callbackLogin.state).empty(),
             "Callback cookie/redirect failed");
+    require(response->headers.at("Set-Cookie") ==
+                cookieName + "=" + access + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + std::to_string(cookieLifetime) + "; Secure",
+            "Cookie configuration or security attributes lost");
     callback(request, response);
     require(response->code == 401 && !pending, "Callback adapter accepted replay");
     claims.purpose = "access";
@@ -729,11 +743,16 @@ static void idpConfigurationTests() {
 
 int main() {
     int failed = 0;
-    for (const auto& [name, test] : std::vector<std::pair<std::string, std::function<void()>>>{{"store", storeTests},
-                                                                                               {"IDP configuration", idpConfigurationTests},
-                                                                                               {"tokens/client", tokenAndClientTests},
-                                                                                               {"reset/migration", resetAndMigrationTests},
-                                                                                               {"google identity", googleTests}}) {
+    for (const auto& [name, test] :
+         std::vector<std::pair<std::string, std::function<void()>>>{{"store", storeTests},
+                                                                    {"IDP configuration", idpConfigurationTests},
+                                                                    {"tokens/client",
+                                                                     [] {
+                                                                         tokenAndClientTests();
+                                                                         tokenAndClientTests("coreci_access_token", 43200);
+                                                                     }},
+                                                                    {"reset/migration", resetAndMigrationTests},
+                                                                    {"google identity", googleTests}}) {
         try {
             test();
             std::cout << name << ": passed\n";
