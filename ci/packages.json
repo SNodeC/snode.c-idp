@@ -114,7 +114,7 @@
       "sqlite-devel"
     ]
   },
-  "revision_base": 17,
+  "revision_base": 0,
   "development_packages": {
     "deb": [
       "snodec-idp-client-dev"
