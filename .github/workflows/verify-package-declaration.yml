@@ -6,11 +6,11 @@ jobs:
   declaration:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: source
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: SNodeC/DistributionPackages
           path: tooling
@@ -21,6 +21,7 @@ jobs:
         working-directory: tooling
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}/tooling
           SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: python3 {0}
         run: |
