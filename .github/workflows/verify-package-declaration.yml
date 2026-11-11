@@ -1,0 +1,33 @@
+name: Verify package declaration
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  declaration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: SNodeC/DistributionPackages
+          path: tooling
+          persist-credentials: false
+      - name: Install declaration validator dependencies
+        run: python3 -m pip install -r tooling/status-templates/requirements.txt
+      - name: Validate the exact source declaration against the worker catalog
+        working-directory: tooling
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: python3 {0}
+        run: |
+          import os
+          from coreci.common import declaration
+          result = declaration("SNodeC/snode.c-idp", os.environ["SOURCE_REF"])
+          base = result.get("revision_base", 0)
+          assert type(base) is int and 0 <= base <= 1000000
+          assert result["schema"] == 1
+          print(f"Validated {result['package']}: {len(result['matrix'])} targets; revision_base={base}")
