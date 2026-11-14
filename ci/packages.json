@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "package": "snodec-idp",
+  "title": "SNode.C IDP",
+  "depends_on": [
+    "snodec"
+  ],
+  "build": {
+    "deb": "ci/package/native.sh",
+    "rpm": "ci/package/native.sh"
+  },
+  "build_dependencies": {
+    "deb": [
+      "cmake",
+      "g++",
+      "make",
+      "pkg-config",
+      "libssl-dev",
+      "nlohmann-json3-dev",
+      "libmagic-dev",
+      "libbluetooth-dev",
+      "libmariadb-dev",
+      "libncurses-dev",
+      "libsqlite3-dev",
+      "python3"
+    ],
+    "rpm": [
+      "cmake",
+      "gcc-c++",
+      "make",
+      "pkgconf-pkg-config",
+      "openssl-devel",
+      "json-devel",
+      "file-devel",
+      "bluez-libs-devel",
+      "mariadb-connector-c-devel",
+      "ncurses-devel",
+      "sqlite-devel",
+      "python3"
+    ]
+  },
+  "targets": [
+    "debian-trixie-amd64",
+    "debian-trixie-arm64",
+    "debian-trixie-armhf",
+    "debian-trixie-riscv64",
+    "debian-forky-amd64",
+    "debian-forky-arm64",
+    "debian-forky-armhf",
+    "debian-forky-riscv64",
+    "debian-sid-amd64",
+    "debian-sid-arm64",
+    "debian-sid-armhf",
+    "debian-sid-riscv64",
+    "ubuntu-noble-amd64",
+    "ubuntu-noble-arm64",
+    "ubuntu-resolute-amd64",
+    "ubuntu-resolute-arm64",
+    "fedora-43-x86_64",
+    "fedora-43-aarch64",
+    "fedora-44-x86_64",
+    "fedora-44-aarch64",
+    "rocky-9-x86_64",
+    "rocky-9-aarch64",
+    "rocky-10-x86_64",
+    "rocky-10-aarch64",
+    "raspberrypios-bookworm-arm64",
+    "raspberrypios-trixie-arm64"
+  ]
+}
