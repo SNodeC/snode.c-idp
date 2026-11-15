@@ -39,7 +39,8 @@
       "ncurses-devel",
       "sqlite-devel",
       "python3"
-    ]
+    ],
+    "openwrt": []
   },
   "targets": [
     "debian-trixie-amd64",
