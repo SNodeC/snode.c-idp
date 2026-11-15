@@ -7,14 +7,17 @@ namespace snodec::auth {
                              std::string publicKey,
                              HttpExchange exchange,
                              std::string cookieName,
-                             unsigned cookieLifetime)
+                             unsigned cookieLifetime,
+                             std::function<int64_t()> clock)
         : issuer_(std::move(issuer))
         , clientId_(std::move(clientId))
         , callbackUrl_(std::move(callbackUrl))
-        , verifier_(issuer_, clientId_, publicKey)
+        , verifier_(issuer_, clientId_, publicKey, clock)
         , exchange_(std::move(exchange))
         , cookieName_(std::move(cookieName))
-        , cookieLifetime_(cookieLifetime) {
+        , cookieLifetime_(cookieLifetime)
+        , sessions_(std::make_shared<std::map<std::string, std::shared_ptr<Session>>>())
+        , clock_(std::move(clock)) {
         require(!cookieName_.empty() &&
                     cookieName_.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~") ==
                         std::string::npos,
@@ -33,12 +36,15 @@ namespace snodec::auth {
     }
 
     OAuthClient::Login OAuthClient::begin(const std::string& localReturn) {
-        std::erase_if(transactions_, [](const auto& item) {
-            return item.second.expires <= epochSeconds();
+        std::erase_if(transactions_, [now = clock_()](const auto& item) {
+            return item.second.expires <= now;
+        });
+        std::erase_if(*sessions_, [now = clock_()](const auto& item) {
+            return item.second->expires <= now;
         });
         require(transactions_.size() < 4096, "Too many pending logins");
         Login login{randomToken(), ""};
-        const Transaction transaction{randomToken(), randomToken(), localPath(localReturn) ? localReturn : "/", epochSeconds() + 600};
+        const Transaction transaction{randomToken(), randomToken(), localPath(localReturn) ? localReturn : "/", clock_() + 600};
         transactions_.emplace(login.state, transaction);
         login.authorizeUrl = issuer_ + "/oauth2/authorize?" +
                              formEncode({{"response_type", "code"},
@@ -59,8 +65,7 @@ namespace snodec::auth {
                                const std::string& code,
                                std::function<void(std::string, std::string)> done) {
         const auto found = transactions_.find(state);
-        if (state.empty() || state != browserState || code.empty() || found == transactions_.end() ||
-            found->second.expires <= epochSeconds()) {
+        if (state.empty() || state != browserState || code.empty() || found == transactions_.end() || found->second.expires <= clock_()) {
             done("", "");
         } else {
             const Transaction transaction = found->second;
@@ -73,49 +78,163 @@ namespace snodec::auth {
                                   {"redirect_uri", callbackUrl_},
                                   {"code_verifier", transaction.verifier}}),
                       {{"Content-Type", "application/x-www-form-urlencoded"}},
-                      [verifier = verifier_, transaction, done](HttpResult response) mutable {
-                          std::string token;
+                      [verifier = verifier_, sessions = sessions_, clock = clock_, lifetime = cookieLifetime_, transaction, done](
+                          HttpResult response) mutable {
+                          std::string credential;
                           try {
-                              require(response.status == 200, "Token exchange failed");
-                              const auto data = Json::parse(response.body);
-                              JwtClaims access, identity;
-                              std::string error;
-                              const auto candidate = data.at("access_token").get<std::string>();
-                              require(verifier.verify(candidate, access, error) && access.mfaVerified &&
-                                          verifier.verify(data.at("id_token").get<std::string>(), identity, error, "id") &&
-                                          identity.nonce == transaction.nonce && identity.subject == access.subject &&
-                                          identity.sessionId == access.sessionId,
-                                      "Invalid token response");
-                              token = candidate;
+                              auto session = std::make_shared<Session>();
+                              session->tokens = tokens(verifier, std::move(response), transaction.nonce, clock());
+                              session->nonce = transaction.nonce;
+                              session->expires = clock() + lifetime;
+                              session->nextCheck = session->tokens.renewAt;
+                              credential = randomToken();
+                              require(sessions->emplace(sha256(credential), session).second, "Session collision");
                           } catch (const std::exception&) {
-                              token.clear();
+                              credential.clear();
                           }
-                          done(token, token.empty() ? "" : transaction.target);
+                          done(credential, credential.empty() ? "" : transaction.target);
                       });
         }
     }
 
-    void OAuthClient::authorize(const std::string& token, std::function<void(bool, JwtClaims)> done) {
+    OAuthClient::Tokens OAuthClient::tokens(JwtVerifier verifier, HttpResult response, const std::string& nonce, int64_t now) {
+        require(response.status == 200, "Token exchange failed");
+        const auto data = Json::parse(response.body);
+        Tokens result;
+        result.access = data.at("access_token").get<std::string>();
+        result.refresh = data.at("refresh_token").get<std::string>();
+        JwtClaims identity;
+        std::string error;
+        require(data.at("refresh_retry") == true && !result.refresh.empty() && verifier.verify(result.access, result.claims, error) &&
+                    result.claims.mfaVerified && verifier.verify(data.at("id_token").get<std::string>(), identity, error, "id") &&
+                    identity.nonce == nonce && identity.subject == result.claims.subject && identity.sessionId == result.claims.sessionId,
+                "Invalid token response");
+        const auto expiry = std::chrono::duration_cast<std::chrono::seconds>(result.claims.expiresAt.time_since_epoch()).count();
+        result.renewAt = now + std::max<int64_t>(1, (expiry - now) * 4 / 5);
+        return result;
+    }
+
+    void OAuthClient::inspect(JwtVerifier verifier,
+                              HttpExchange exchange,
+                              const std::string& issuer,
+                              const std::string& clientId,
+                              const std::string& token,
+                              Completion done) {
         JwtClaims claims;
         std::string error;
-        if (!verifier_.verify(token, claims, error) || !claims.mfaVerified) {
-            done(false, {});
+        if (!verifier.verify(token, claims, error) || !claims.mfaVerified) {
+            done(Authorization::Rejected, {});
         } else {
-            exchange_(issuer_ + "/oauth2/introspect",
-                      "POST",
-                      formEncode({{"token", token}, {"client_id", clientId_}}),
-                      {{"Content-Type", "application/x-www-form-urlencoded"}, {"Authorization", "Bearer " + token}},
-                      [claims, done](HttpResult response) {
-                          bool active = false;
-                          try {
-                              const auto data = Json::parse(response.body);
-                              active = response.status == 200 && data.at("active").get<bool>() && data.at("sub") == claims.subject &&
-                                       data.at("sid") == claims.sessionId && data.at("mfa_verified") == true;
-                          } catch (const std::exception&) {
-                              active = false;
-                          }
-                          done(active, active ? claims : JwtClaims{});
-                      });
+            exchange(issuer + "/oauth2/introspect",
+                     "POST",
+                     formEncode({{"token", token}, {"client_id", clientId}}),
+                     {{"Content-Type", "application/x-www-form-urlencoded"}, {"Authorization", "Bearer " + token}},
+                     [claims, done](HttpResult response) {
+                         auto status =
+                             response.status == 0 || response.status >= 500 ? Authorization::Unavailable : Authorization::Rejected;
+                         try {
+                             const auto data = Json::parse(response.body);
+                             if (response.status == 200 && data.at("active").get<bool>() && data.at("sub") == claims.subject &&
+                                 data.at("sid") == claims.sessionId && data.at("mfa_verified") == true) {
+                                 status = Authorization::Accepted;
+                             }
+                         } catch (const std::exception&) {
+                         }
+                         done(status, status == Authorization::Accepted ? claims : JwtClaims{});
+                     });
+        }
+    }
+
+    void OAuthClient::authorize(const std::string& token, std::function<void(bool, JwtClaims)> done) {
+        inspect(verifier_, exchange_, issuer_, clientId_, token, [done](Authorization status, JwtClaims claims) {
+            done(status == Authorization::Accepted, std::move(claims));
+        });
+    }
+
+    bool OAuthClient::renewalDue(const std::string& credential) const {
+        const auto found = sessions_->find(sha256(credential));
+        return found == sessions_->end() || clock_() >= std::min(found->second->nextCheck, found->second->expires);
+    }
+
+    void OAuthClient::authenticate(const std::string& credential, bool bearer, Completion done) {
+        if (bearer) {
+            authorize(credential, [done](bool accepted, JwtClaims claims) {
+                done(accepted ? Authorization::Accepted : Authorization::Rejected, std::move(claims));
+            });
+        } else {
+            authorizeSession(credential, std::move(done));
+        }
+    }
+
+    void OAuthClient::authorizeSession(const std::string& credential, Completion done) {
+        const auto key = sha256(credential);
+        const auto found = sessions_->find(key);
+        if (found == sessions_->end() || found->second->expires <= clock_()) {
+            sessions_->erase(key);
+            done(Authorization::Rejected, {});
+        } else {
+            const auto session = found->second;
+            session->waiting.push_back(std::move(done));
+            if (session->waiting.size() == 1) {
+                const auto finish = [sessions = sessions_, session, key, clock = clock_](Authorization status, JwtClaims claims) {
+                    if (clock() >= session->expires) {
+                        status = Authorization::Rejected;
+                        claims = {};
+                    }
+                    session->nextCheck = status == Authorization::Unavailable ? clock() + 5 : session->tokens.renewAt;
+                    if (status == Authorization::Rejected) {
+                        sessions->erase(key);
+                    }
+                    auto waiting = std::move(session->waiting);
+                    session->waiting.clear();
+                    for (const auto& callback : waiting) {
+                        callback(status, claims);
+                    }
+                };
+                if (clock_() >= session->tokens.renewAt || !session->operation.empty()) {
+                    if (session->operation.empty()) {
+                        session->operation = randomToken();
+                    }
+                    exchange_(issuer_ + "/oauth2/token",
+                              "POST",
+                              formEncode({{"grant_type", "refresh_token"},
+                                          {"refresh_token", session->tokens.refresh},
+                                          {"client_id", clientId_},
+                                          {"refresh_request_id", session->operation}}),
+                              {{"Content-Type", "application/x-www-form-urlencoded"}},
+                              [verifier = verifier_,
+                               exchange = exchange_,
+                               issuer = issuer_,
+                               clientId = clientId_,
+                               clock = clock_,
+                               session,
+                               finish](HttpResult response) mutable {
+                                  if (response.status == 0 || response.status >= 500) {
+                                      finish(Authorization::Unavailable, {});
+                                  } else {
+                                      bool valid = false;
+                                      try {
+                                          auto renewed = tokens(verifier, std::move(response), session->nonce, clock());
+                                          require(renewed.claims.subject == session->tokens.claims.subject &&
+                                                      renewed.claims.sessionId == session->tokens.claims.sessionId &&
+                                                      renewed.claims.scopes == session->tokens.claims.scopes,
+                                                  "Renewal changed identity");
+                                          session->tokens = std::move(renewed);
+                                          session->operation.clear();
+                                          valid = true;
+                                      } catch (const std::exception&) {
+                                      }
+                                      if (valid) {
+                                          inspect(verifier, exchange, issuer, clientId, session->tokens.access, finish);
+                                      } else {
+                                          finish(Authorization::Rejected, {});
+                                      }
+                                  }
+                              });
+                } else {
+                    inspect(verifier_, exchange_, issuer_, clientId_, session->tokens.access, finish);
+                }
+            }
         }
     }
 

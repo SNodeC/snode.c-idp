@@ -38,7 +38,7 @@ if a newer login replaced its transaction.
 TOTP completes that pending primary-authenticated transaction. An authorization
 code is single-use, lasts two minutes, and is bound to its client, exact callback,
 PKCE challenge and live session. Refresh rotation uses the same session authority.
-Replaying a used refresh token revokes that session and its remaining grants.
+Replaying a used refresh token with a different operation revokes that session and its remaining grants; a repeated `refresh_request_id` can recover its same, still-unused replacement without rotating again or extending its lifetime.
 SSO reuses the browser's existing session, so logout revokes every application
 grant issued from it. Enrollment started from a session also requires that
 session to remain active until completion. An expired registration/enrollment
@@ -348,12 +348,12 @@ Construct one shared `OAuthClient(issuer, clientId, callbackUrl, publicKeyPem)`
 and give that same instance to `JwtAuthMiddleware`, `OAuth2CallbackHandler`, or
 `AuthMiddleware`. Independent instances do not share pending transactions.
 Handlers retain the client; keep configured application objects alive through
-pending requests. A process restart discards local pending logins; start again.
+pending requests. A process restart discards local pending logins and browser sessions; start again.
 Multiple application workers need routing that returns a callback to the worker
 that initiated it. A shared multi-process transaction store is not implemented.
 
 `JwtAuthMiddleware` starts sign-in for browser GET/HEAD requests without a valid
-credential, including expired or revoked access cookies. It clears the rejected
+credential, including expired or revoked browser sessions. It clears the rejected
 access cookie while setting a fresh OAuth transaction cookie. An explicit
 Authorization header or a non-GET/HEAD request receives 401 on authentication
 failure; state-changing requests are not replayed through login.
@@ -386,16 +386,15 @@ algorithm, signature, issuer, audience, typed times, or missing session identity
 Use the middleware for authorization. `OAuthClient` accepts an injectable
 `HttpExchange` for offline tests; production uses the shipped SNode.C transport.
 
-The access cookie defaults to `access_token`, HttpOnly, SameSite=Lax, and Secure
+The browser session cookie defaults to `access_token`, HttpOnly, SameSite=Lax, and Secure
 on HTTPS, with a five-minute lifetime. The optional `OAuthClient` constructor
 arguments after `HttpExchange` configure its name and lifetime in seconds, for
 example `httpExchange, "coreci_access_token", 43200`. Both middleware adapters and
 the callback use this one configuration; callers reading the cookie directly use
 `client->cookieName()`. Empty or invalid cookie names and zero lifetimes are rejected.
-The example, environment and Compose defaults remain unchanged. This minimal browser adapter does not
-silently refresh; the IDP can reauthorize an existing session on the next login.
-The token endpoint supports rotating refresh tokens for separately implemented
-clients; those clients must retain and replace each refresh token securely.
+The example, environment and Compose defaults remain unchanged. The cookie contains an opaque credential; access and refresh tokens remain in the shared SDK instance's memory. `complete()` returns that browser credential, `authorizeSession()` checks it with the IDP and renews before access expiry when called while active, and `renewalDue()` lets an existing stream timer request the next renewal. Both middleware adapters use `authenticate()` to distinguish browser credentials from bearer JWTs; `authorize()` remains the non-renewing JWT API. Concurrent requests share the pending session operation rather than rotating the same refresh credential independently. The configured cookie lifetime is an absolute local session limit and is not extended by renewal.
+
+Renewable browser sessions require IDP 2.0.5 or later, which advertises `refresh_retry: true` in token responses. Upgrade the provider before applications using this SDK. Each refresh sends one random `refresh_request_id`; a transport failure retries that same operation, not a new redemption of a one-time credential. The store returns the same replacement only while that child grant is unused and the IDP session remains active; a different operation on a consumed grant still revokes the session. Replacement secrets remain hash-only in the database. A temporary provider failure yields `Authorization::Unavailable` and retains the session; HTTP adapters return 503, while a stream can pause protected updates and retry without closing its connection. Expired/revoked sessions yield `Rejected`. No new deployment environment or Compose setting is required.
 
 ## Account and protocol endpoints
 

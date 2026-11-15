@@ -2,6 +2,8 @@
 import argparse
 import base64
 from contextlib import ExitStack
+import hashlib
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -95,7 +97,7 @@ def main():
             assert response.status == 303 and response.headers['Location'] == '/index.html'
         with get(app + '/index.html') as response:
             assert response.status == 200
-        # Use disposable signed tokens and live IDP session rows to exercise the real example.
+        # Complete the actual PKCE callback against disposable IDP session/code rows.
         with sqlite3.connect(root / 'auth.db') as db:
             user = db.execute("INSERT INTO user(username,email,password_hash,password_salt) VALUES(?,?,?,?)",
                               ('home-test', 'home@example.test', 'unused', '')).lastrowid
@@ -111,18 +113,39 @@ def main():
                                        input=unsigned, capture_output=True, check=True).stdout
             return (unsigned + b'.' + encode(signature)).decode()
         active = token(int(time.time()) + 300)
-        with get(app + '/', {'Cookie': 'access_token=' + active}) as response:
+        with get(app + '/private') as response:
+            assert response.status in (302, 303)
+            authorization = {key: values[0] for key, values in parse_qs(urlparse(response.headers['Location']).query).items()}
+        code = 'direct-tls-code'
+        grant = authorization | dict(user_id=str(user), sid=str(session), mfa_verified=True)
+        with sqlite3.connect(root / 'auth.db') as db:
+            db.execute('INSERT INTO auth_code(code,session_id,context,expires_at) VALUES(?,?,?,?)',
+                       (base64.urlsafe_b64encode(hashlib.sha256(code.encode()).digest()).rstrip(b'=').decode(),
+                        str(session), json.dumps(grant), int(time.time()) + 120))
+        state = authorization['state']
+        with get(app + '/auth/callback?state=' + state + '&code=' + code,
+                 {'Cookie': 'oauth_' + state + '=' + state}) as response:
+            assert response.status in (302, 303) and response.headers['Location'] == '/private', response.status
+            cookies = SimpleCookie()
+            for header in response.headers.get_all('Set-Cookie', []):
+                cookies.load(header)
+            credential = cookies['access_token'].value
+            assert credential and credential != active and '.' not in credential
+            assert cookies['access_token']['httponly'] and cookies['access_token']['secure']
+        with get(app + '/', {'Cookie': 'access_token=' + credential}) as response:
             assert response.status == 303 and response.headers['Location'] == '/private'
             assert response.headers['Cache-Control'] == 'no-store'
-        with get(app + '/private', {'Cookie': 'access_token=' + active}) as response:
+        with get(app + '/private', {'Cookie': 'access_token=' + credential}) as response:
             assert response.status in (200, 308)
-        for rejected in ['invalid', token(int(time.time()) - 1), token(int(time.time()) + 300, False)]:
+        with get(app + '/private', {'Authorization': 'Bearer ' + active}) as response:
+            assert response.status in (200, 308)
+        for rejected in ['invalid', active, token(int(time.time()) - 1), token(int(time.time()) + 300, False)]:
             with get(app + '/', {'Cookie': 'access_token=' + rejected}) as response:
                 assert response.status == 303 and response.headers['Location'] == '/index.html'
                 assert response.headers['Cache-Control'] == 'no-store'
         with sqlite3.connect(root / 'auth.db') as db:
             db.execute('DELETE FROM session WHERE id=?', (session,))
-        with get(app + '/', {'Cookie': 'access_token=' + active}) as response:
+        with get(app + '/', {'Cookie': 'access_token=' + credential}) as response:
             assert response.status == 303 and response.headers['Location'] == '/index.html'
         with get(app + '/private') as response:
             assert response.status in (302, 303)

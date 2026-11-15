@@ -202,6 +202,43 @@ static void storeTests() {
     rejects([&] {
         store.redeem(refresh);
     });
+    const auto retryLogin = store.complete(store.begin(proven), "1", true);
+    redemption["code"] = retryLogin.at("code");
+    const auto retryGrant = store.redeem(redemption);
+    Json retry = {{"grant_type", "refresh_token"},
+                  {"refresh_token", retryGrant.at("refresh_token")},
+                  {"client_id", "app"},
+                  {"refresh_request_id", randomToken()}};
+    const auto retryResult = store.redeem(retry);
+    require(store.redeem(retry).at("refresh_token") == retryResult.at("refresh_token") && store.active(retryGrant.at("sid"), "1", true),
+            "Lost refresh response cannot be recovered safely");
+    int tokenRows = 0;
+    db.query("SELECT count(*) FROM refresh_token WHERE session_id=?", {retryGrant.at("sid")}, [&](const auto& row) {
+        tokenRows = std::stoi(row.get(0));
+    });
+    require(tokenRows == 2, "Retry allocated a second replacement credential");
+    auto nextRefresh = retry;
+    nextRefresh["refresh_token"] = retryResult.at("refresh_token");
+    nextRefresh["refresh_request_id"] = randomToken();
+    store.redeem(nextRefresh);
+    rejects(
+        [&] {
+            store.redeem(retry);
+        },
+        "Refresh operation no longer active");
+    require(store.active(retryGrant.at("sid"), "1", true), "A stale identical operation revoked a later valid grant");
+    wrong = retry;
+    wrong["client_id"] = "other";
+    rejects([&] {
+        store.redeem(wrong);
+    });
+    require(store.active(retryGrant.at("sid"), "1", true), "Wrong client revoked the legitimate session");
+    wrong = retry;
+    wrong["refresh_request_id"] = randomToken();
+    rejects([&] {
+        store.redeem(wrong);
+    });
+    require(!store.active(retryGrant.at("sid"), "1", true), "A different refresh operation bypassed replay revocation");
     const auto initial = store.complete(store.begin(proven), "1", true);
     auto ssoContext = proven;
     ssoContext["sid"] = initial.at("sid");
@@ -565,8 +602,12 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
     require(verifiedJwt(signer.sign(claims), signer.publicKey()).at("acr") == "urn:snodec:acr:mfa",
             "ID token did not report completed MFA assurance");
     auto finish = std::move(pending);
-    finish({200, Json({{"access_token", access}, {"id_token", signer.sign(claims)}}).dump()});
-    require(received == access && target == "/private?x=1", "Valid login failed");
+    finish(
+        {200,
+         Json({{"access_token", access}, {"id_token", signer.sign(claims)}, {"refresh_token", "fixture-refresh"}, {"refresh_retry", true}})
+             .dump()});
+    require(!received.empty() && received != access && target == "/private?x=1", "Valid browser session failed");
+    const auto browserCredential = received;
     called = false;
     client->complete(login.state, login.state, "code", [&](auto token, auto) {
         called = true;
@@ -579,7 +620,10 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
     });
     claims.nonce = "wrong";
     finish = std::move(pending);
-    finish({200, Json({{"access_token", access}, {"id_token", signer.sign(claims)}}).dump()});
+    finish(
+        {200,
+         Json({{"access_token", access}, {"id_token", signer.sign(claims)}, {"refresh_token", "fixture-refresh"}, {"refresh_retry", true}})
+             .dump()});
     require(received.empty(), "Nonce mismatch accepted");
     bool accepted = false;
     client->authorize(access, [&](bool ok, auto) {
@@ -608,7 +652,7 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
     request->method = "GET";
     request->url = "/";
     request->originalUrl = "/private";
-    request->cookies[cookieName] = access;
+    request->cookies[cookieName] = browserCredential;
     auto response = std::make_shared<TestResponse>();
     bool next = false;
     middleware(request, response, [&] {
@@ -658,12 +702,16 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
     claims.purpose = "id";
     claims.nonce = callbackParameters.at("nonce");
     finish = std::move(pending);
-    finish({200, Json({{"access_token", access}, {"id_token", signer.sign(claims)}}).dump()});
-    require(response->location == "/private" && response->headers.at("Set-Cookie").find(cookieName + "=" + access) == 0 &&
-                response->cookies.at("oauth_" + callbackLogin.state).empty(),
+    finish(
+        {200,
+         Json({{"access_token", access}, {"id_token", signer.sign(claims)}, {"refresh_token", "fixture-refresh"}, {"refresh_retry", true}})
+             .dump()});
+    const auto sessionCookie = response->headers.at("Set-Cookie");
+    require(response->location == "/private" && sessionCookie.starts_with(cookieName + "=") &&
+                sessionCookie.find(access) == std::string::npos && response->cookies.at("oauth_" + callbackLogin.state).empty(),
             "Callback cookie/redirect failed");
-    require(response->headers.at("Set-Cookie") ==
-                cookieName + "=" + access + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + std::to_string(cookieLifetime) + "; Secure",
+    require(sessionCookie.substr(sessionCookie.find(';')) ==
+                "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + std::to_string(cookieLifetime) + "; Secure",
             "Cookie configuration or security attributes lost");
     callback(request, response);
     require(response->code == 401 && !pending, "Callback adapter accepted replay");
@@ -694,6 +742,148 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
                 cookie.find("SameSite=Lax") != std::string::npos,
             "Unsafe credential cookie");
     require(!localPath("//evil") && !localPath("/\\evil") && !localPath("/\r\nX: y"), "Unsafe local redirect");
+}
+
+static void renewalTests() {
+    using Status = OAuthClient::Authorization;
+    int64_t now = epochSeconds();
+    const auto start = now;
+    JwtSigner signer("https://idp.example", privateKey());
+    std::string nonce, currentRefresh = randomToken(), lastOperation, lastRefresh;
+    HttpResult lastResponse;
+    bool revoked = false, delayed = false, lost = false, unavailable = false;
+    int refreshCalls = 0, rotations = 0, completions = 0;
+    std::vector<std::function<void()>> pending;
+    const auto responseTokens = [&] {
+        JwtClaims claims;
+        claims.subject = "1";
+        claims.sessionId = "42";
+        claims.audience = "app";
+        claims.mfaVerified = true;
+        claims.scopes = {"openid", "profile", "email"};
+        claims.expiresAt = std::chrono::system_clock::time_point(std::chrono::seconds(now + 120));
+        const auto access = signer.sign(claims);
+        claims.purpose = "id";
+        claims.nonce = nonce;
+        return HttpResult{
+            200,
+            Json{{"access_token", access}, {"id_token", signer.sign(claims)}, {"refresh_token", currentRefresh}, {"refresh_retry", true}}
+                .dump()};
+    };
+    HttpExchange transport = [&](const auto& url, const auto&, const auto& body, const auto&, HttpCompletion done) {
+        const auto fields = form(body);
+        HttpResult response;
+        if (url.ends_with("/token")) {
+            if (fields.at("grant_type") == "authorization_code") {
+                response = responseTokens();
+            } else {
+                ++refreshCalls;
+                if (revoked) {
+                    response.status = 400;
+                } else if (fields.at("refresh_token") == lastRefresh && fields.at("refresh_request_id") == lastOperation) {
+                    response = lastResponse;
+                } else {
+                    require(fields.at("refresh_token") == currentRefresh, "Refresh credential reused with a different operation");
+                    ++rotations;
+                    lastRefresh = currentRefresh;
+                    lastOperation = fields.at("refresh_request_id");
+                    currentRefresh = randomToken();
+                    lastResponse = responseTokens();
+                    response = lost ? HttpResult{} : lastResponse;
+                    lost = false;
+                }
+            }
+        } else {
+            require(url.ends_with("/introspect"), "Unexpected authorization endpoint");
+            response =
+                unavailable
+                    ? HttpResult{503, ""}
+                    : HttpResult{200, revoked ? R"({"active":false})" : R"({"active":true,"sub":"1","sid":"42","mfa_verified":true})"};
+        }
+        if (delayed) {
+            pending.push_back([done = std::move(done), response] {
+                done(response);
+            });
+        } else {
+            done(response);
+        }
+    };
+    auto client = std::make_shared<OAuthClient>(
+        "https://idp.example", "app", "https://app.example/callback", signer.publicKey(), transport, "coreci_access_token", 3600, [&] {
+            return now;
+        });
+    const auto login = client->begin("/dashboard");
+    nonce = form(login.authorizeUrl.substr(login.authorizeUrl.find('?') + 1)).at("nonce");
+    std::string credential;
+    client->complete(login.state, login.state, "code", [&](auto value, auto target) {
+        require(target == "/dashboard", "Login return lost");
+        credential = value;
+    });
+    require(!credential.empty(), "Renewable browser login failed");
+    auto status = Status::Rejected;
+    const auto complete = [&](Status value, JwtClaims claims) {
+        status = value;
+        ++completions;
+        require(value != Status::Accepted || (claims.subject == "1" && claims.sessionId == "42"), "Identity changed");
+    };
+    int64_t checked = now;
+    for (now = start; now <= start + 1800; ++now) {
+        if (now - checked >= 59 || client->renewalDue(credential)) {
+            client->authorizeSession(credential, complete);
+            require(status == Status::Accepted, "Valid session disconnected during 30 simulated minutes");
+            checked = now;
+        }
+    }
+    require(rotations >= 18, "Short-lived token renewal did not execute repeatedly");
+    now += 120;
+    delayed = true;
+    const auto beforeCalls = refreshCalls, beforeCompletions = completions;
+    client->authorizeSession(credential, complete);
+    client->authorizeSession(credential, complete);
+    require(refreshCalls == beforeCalls + 1 && completions == beforeCompletions, "Concurrent tabs rotated independently");
+    while (!pending.empty()) {
+        auto batch = std::move(pending);
+        pending.clear();
+        for (const auto& done : batch) {
+            done();
+        }
+    }
+    delayed = false;
+    require(completions == beforeCompletions + 2 && status == Status::Accepted, "Concurrent callers did not share renewal");
+    now += 120;
+    lost = true;
+    const auto beforeRotations = rotations;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Unavailable && !client->renewalDue(credential), "Ambiguous refresh did not preserve the session");
+    now += 5;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Accepted && rotations == beforeRotations + 1, "Lost-response retry reused a refresh operation unsafely");
+    unavailable = true;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Unavailable, "Temporary introspection outage invalidated the session");
+    unavailable = false;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Accepted, "Session did not recover from provider unavailability");
+    bool bearerAccepted = true;
+    client->authorize(credential, [&](bool accepted, auto) {
+        bearerAccepted = accepted;
+    });
+    require(!bearerAccepted, "Browser credential accepted as a bearer JWT");
+    revoked = true;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Rejected, "Revoked session accepted");
+    revoked = false;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Rejected, "Rejected browser session resurrected");
+    const auto freshLogin = client->begin("/dashboard");
+    nonce = form(freshLogin.authorizeUrl.substr(freshLogin.authorizeUrl.find('?') + 1)).at("nonce");
+    client->complete(freshLogin.state, freshLogin.state, "code", [&](auto value, auto) {
+        credential = value;
+    });
+    require(!credential.empty(), "New login after revocation failed");
+    now += 3600;
+    client->authorizeSession(credential, complete);
+    require(status == Status::Rejected, "Renewal extended the absolute browser session lifetime");
 }
 
 static void idpConfigurationTests() {
@@ -745,6 +935,7 @@ int main() {
     int failed = 0;
     for (const auto& [name, test] :
          std::vector<std::pair<std::string, std::function<void()>>>{{"store", storeTests},
+                                                                    {"session renewal", renewalTests},
                                                                     {"IDP configuration", idpConfigurationTests},
                                                                     {"tokens/client",
                                                                      [] {

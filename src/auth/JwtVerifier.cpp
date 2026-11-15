@@ -74,10 +74,14 @@ namespace snodec::auth {
         return claims;
     }
 
-    JwtVerifier::JwtVerifier(const std::string& issuer, const std::string& audience, const std::string& publicKeyPem)
+    JwtVerifier::JwtVerifier(const std::string& issuer,
+                             const std::string& audience,
+                             const std::string& publicKeyPem,
+                             std::function<int64_t()> clock)
         : issuer_(issuer)
         , audience_(audience)
-        , publicKeyPem_(publicKeyPem) {
+        , publicKeyPem_(publicKeyPem)
+        , clock_(std::move(clock)) {
     }
 
     bool JwtVerifier::verify(const std::string& token, JwtClaims& outClaims, std::string& error, const std::string& purpose) {
@@ -92,7 +96,7 @@ namespace snodec::auth {
                     "Invalid token issuer, audience or purpose");
             require(payload.at("exp").is_number_integer() && payload.at("iat").is_number_integer() && payload.at("nbf").is_number_integer(),
                     "Invalid token times");
-            const auto now = epochSeconds();
+            const auto now = clock_();
             const auto expiry = payload.at("exp").get<int64_t>();
             require(expiry > now && payload.at("nbf").get<int64_t>() <= now && payload.at("iat").get<int64_t>() <= now,
                     "Token expired or not yet valid");

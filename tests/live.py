@@ -109,9 +109,9 @@ def token(session, host="localhost"):
     )
 
 
-def api(origin, credential):
+def api(origin, credential, bearer=False):
     return requests.get(
-        origin + "/api", headers={"Authorization": "Bearer " + credential}, timeout=15
+        origin + "/api", headers={"Authorization": "Bearer " + credential} if bearer else {"Cookie": "access_token=" + credential}, timeout=15
     )
 
 
@@ -509,11 +509,7 @@ def password_and_mfa():
     callback = response.headers["Location"]
     assert session.get(callback, timeout=15).status_code == 200
     assert session.get(callback, timeout=15).status_code == 401
-    assert session.get(
-        IDP + "/oauth2/userinfo",
-        headers={"Authorization": "Bearer " + token(session)},
-        timeout=15,
-    ).json()["sub"]
+    assert api(APP, token(session)).status_code == 200
     single, _ = registration("password-only", mfa=False)
     response = single.get(APP + "/private", allow_redirects=False, timeout=15)
     authorization = urlparse(response.headers["Location"])
@@ -709,7 +705,8 @@ def grants():
     assert (
         requests.post(IDP + "/oauth2/token", data=data, timeout=15).status_code == 400
     )
-    assert api(APP, tokens["access_token"]).status_code == 200
+    assert api(APP, tokens["access_token"], bearer=True).status_code == 200
+    assert requests.get(IDP + "/oauth2/userinfo", headers={"Authorization": "Bearer " + tokens["access_token"]}, timeout=15).json()["sub"]
     refresh = dict(
         grant_type="refresh_token",
         refresh_token=tokens["refresh_token"],
@@ -723,7 +720,7 @@ def grants():
         requests.post(IDP + "/oauth2/token", data=refresh, timeout=15).status_code
         == 400
     )
-    assert api(APP, tokens["access_token"]).status_code == 401
+    assert api(APP, tokens["access_token"], bearer=True).status_code == 401
 
 
 def backup_restore(root, binary, env):
