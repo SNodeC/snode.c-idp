@@ -1776,6 +1776,7 @@ window.onload = () => {
                          Json result = {{"access_token", jwtSigner.sign(claims)},
                                         {"token_type", "Bearer"},
                                         {"expires_in", 300},
+                                        {"refresh_retry", true},
                                         {"refresh_token", context.at("refresh_token")}};
                          if (std::find(claims.scopes.begin(), claims.scopes.end(), "openid") != claims.scopes.end()) {
                              claims.purpose = "id";

@@ -59,28 +59,33 @@ namespace snodec::auth::middleware {
             if (!header.starts_with("Bearer ") && !client_->cookieRequestAllowed(req->method, req->get("Origin"))) {
                 res->status(403).send("Untrusted request origin");
             } else {
-                client_->authorize(token, [client = client_, req, res, next, header](bool accepted, JwtClaims claims) mutable {
-                    if (accepted) {
-                        req->template setAttribute<UserContext>(
-                            {claims.subject, claims.username, claims.scopes, claims.email, claims.mfaVerified});
-                        req->template setAttribute<std::string>(claims.subject, "X-User-Id");
-                        req->template setAttribute<std::string>(claims.username, "X-Username");
-                        req->template setAttribute<std::string>(claims.email, "X-Email");
-                        req->template setAttribute<bool>(claims.mfaVerified, "X-MfaVerified");
-                        next();
-                    } else if (!header.empty() || (req->method != "GET" && req->method != "HEAD")) {
-                        res->set("Set-Cookie", client->cookie(client->cookieName(), "", 0));
-                        res->status(401).send("Unauthorized");
-                    } else {
-                        try {
-                            const auto login = client->begin(req->originalUrl);
-                            res->set("Set-Cookie", client->cookie("oauth_" + login.state, login.state, 600));
-                            res->cookie(client->cookieName(), "", {{"Path", "/"}, {"Max-Age", "0"}}).redirect(login.authorizeUrl);
-                        } catch (const std::exception&) {
+                client_->authenticate(
+                    token,
+                    header.starts_with("Bearer "),
+                    [client = client_, req, res, next, header](OAuthClient::Authorization status, JwtClaims claims) mutable {
+                        if (status == OAuthClient::Authorization::Unavailable) {
                             res->status(503).send("Authentication unavailable");
+                        } else if (status == OAuthClient::Authorization::Accepted) {
+                            req->template setAttribute<UserContext>(
+                                {claims.subject, claims.username, claims.scopes, claims.email, claims.mfaVerified});
+                            req->template setAttribute<std::string>(claims.subject, "X-User-Id");
+                            req->template setAttribute<std::string>(claims.username, "X-Username");
+                            req->template setAttribute<std::string>(claims.email, "X-Email");
+                            req->template setAttribute<bool>(claims.mfaVerified, "X-MfaVerified");
+                            next();
+                        } else if (!header.empty() || (req->method != "GET" && req->method != "HEAD")) {
+                            res->set("Set-Cookie", client->cookie(client->cookieName(), "", 0));
+                            res->status(401).send("Unauthorized");
+                        } else {
+                            try {
+                                const auto login = client->begin(req->originalUrl);
+                                res->set("Set-Cookie", client->cookie("oauth_" + login.state, login.state, 600));
+                                res->cookie(client->cookieName(), "", {{"Path", "/"}, {"Max-Age", "0"}}).redirect(login.authorizeUrl);
+                            } catch (const std::exception&) {
+                                res->status(503).send("Authentication unavailable");
+                            }
                         }
-                    }
-                });
+                    });
             }
         }
 

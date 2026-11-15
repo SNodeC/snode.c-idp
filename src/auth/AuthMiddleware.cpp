@@ -19,15 +19,19 @@ namespace snodec {
                 if (!header.starts_with("Bearer ") && !client->cookieRequestAllowed(req->method, req->get("Origin"))) {
                     res->status(403).send("Untrusted request origin");
                 } else {
-                    client->authorize(token, [req, res, next](bool accepted, JwtClaims claims) mutable {
-                        if (accepted) {
-                            req->setAttribute<UserContext>(
-                                {claims.subject, claims.username, claims.scopes, claims.email, claims.mfaVerified});
-                            next();
-                        } else {
-                            res->status(401).send("Unauthorized");
-                        }
-                    });
+                    client->authenticate(token,
+                                         header.starts_with("Bearer "),
+                                         [req, res, next](OAuthClient::Authorization status, JwtClaims claims) mutable {
+                                             if (status == OAuthClient::Authorization::Accepted) {
+                                                 req->setAttribute<UserContext>(
+                                                     {claims.subject, claims.username, claims.scopes, claims.email, claims.mfaVerified});
+                                                 next();
+                                             } else if (status == OAuthClient::Authorization::Unavailable) {
+                                                 res->status(503).send("Authentication unavailable");
+                                             } else {
+                                                 res->status(401).send("Unauthorized");
+                                             }
+                                         });
                 }
             };
         }

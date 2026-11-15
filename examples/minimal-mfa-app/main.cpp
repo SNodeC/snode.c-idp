@@ -40,10 +40,12 @@ int main(int argc, char** argv) {
     app.use("/private", auth);
     app.use("/private", express::middleware::StaticMiddleware("pages/private"));
     app.get("/", [client] APPLICATION(req, res) {
-        client->authorize(req->cookie(client->cookieName()), [res](bool accepted, const auto&) {
+        client->authorizeSession(req->cookie(client->cookieName()), [res](auto status, const auto&) {
             res->set("Cache-Control", "no-store");
-            if (accepted) {
+            if (status == snodec::auth::OAuthClient::Authorization::Accepted) {
                 res->redirect(303, "/private");
+            } else if (status == snodec::auth::OAuthClient::Authorization::Unavailable) {
+                res->status(503).send("Authentication unavailable");
             } else {
                 res->redirect(303, "/index.html");
             }

@@ -188,13 +188,29 @@ namespace snodec::auth {
                           }),
                 "Grant lookup failed");
         require(context.is_object() && context.at("client_id") == parameters.value("client_id", std::string()), "Invalid grant");
-        if (used) {
+        const auto operation = refresh ? parameters.value("refresh_request_id", std::string()) : std::string();
+        require(operation.empty() ||
+                    (operation.size() >= 43 && operation.size() <= 128 &&
+                     operation.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") == std::string::npos),
+                "Invalid refresh operation");
+        const bool repeated = used && !operation.empty() && context.value("refresh_request_id", std::string()) == operation;
+        if (used && !repeated) {
             execute("DELETE FROM session WHERE id=?", {context.at("sid").get<std::string>()});
             transaction.commit();
             throw std::runtime_error("Refresh token replay");
         }
         require(active(context.at("sid"), context.at("user_id"), context.at("mfa_verified")), "Session revoked");
-        if (!refresh) {
+        const auto replacement = refresh && !operation.empty() ? sha256(credential + "." + operation) : randomToken();
+        context.erase("refresh_request_id");
+        if (repeated) {
+            bool available = false;
+            require(db_.query("SELECT token_hash FROM refresh_token WHERE token_hash=? AND used=0 AND expires_at>?",
+                              {sha256(replacement), std::to_string(epochSeconds())},
+                              [&](const auto&) {
+                                  available = true;
+                              }) && available,
+                    "Refresh operation no longer active");
+        } else if (!refresh) {
             const auto verifier = parameters.value("code_verifier", std::string());
             require(verifier.size() >= 43 && verifier.size() <= 128 &&
                         verifier.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") ==
@@ -204,12 +220,15 @@ namespace snodec::auth {
                     "Invalid PKCE or callback");
             execute("DELETE FROM auth_code WHERE code=?", {sha256(credential)});
         } else {
-            execute("UPDATE refresh_token SET used=1 WHERE token_hash=? AND used=0", {sha256(credential)});
+            auto consumed = context;
+            consumed["refresh_request_id"] = operation;
+            execute("UPDATE refresh_token SET used=1,context=? WHERE token_hash=? AND used=0", {consumed.dump(), sha256(credential)});
         }
-        require(db_.changedRows() == 1, "Credential already consumed");
-        const auto replacement = randomToken();
-        execute("INSERT INTO refresh_token(token_hash,session_id,context,expires_at) VALUES(?,?,?,?)",
-                {sha256(replacement), context.at("sid"), context.dump(), std::to_string(epochSeconds() + 86400)});
+        if (!repeated) {
+            require(db_.changedRows() == 1, "Credential already consumed");
+            execute("INSERT INTO refresh_token(token_hash,session_id,context,expires_at) VALUES(?,?,?,?)",
+                    {sha256(replacement), context.at("sid"), context.dump(), std::to_string(epochSeconds() + 86400)});
+        }
         transaction.commit();
         context["refresh_token"] = replacement;
         return context;

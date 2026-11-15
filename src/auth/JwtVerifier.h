@@ -4,6 +4,7 @@
 #include "UserContext.h"
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,7 +31,10 @@ namespace snodec {
 
         class JwtVerifier {
         public:
-            JwtVerifier(const std::string& issuer, const std::string& audience, const std::string& publicKeyPem);
+            JwtVerifier(const std::string& issuer,
+                        const std::string& audience,
+                        const std::string& publicKeyPem,
+                        std::function<int64_t()> clock = epochSeconds);
 
             bool verify(const std::string& token, JwtClaims& outClaims, std::string& error, const std::string& purpose = "access");
 
@@ -38,6 +42,7 @@ namespace snodec {
             std::string issuer_;
             std::string audience_;
             std::string publicKeyPem_;
+            std::function<int64_t()> clock_;
         };
 
     } // namespace auth
