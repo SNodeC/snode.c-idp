@@ -5,7 +5,7 @@ build=/tmp/codex/build/snodec-idp/wave
 mkdir -p "$build" "$OUTPUT_DIR"
 export TMPDIR="$build"
 cmake -S "$SOURCE_DIR" -B "$build" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=ON
+    -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=ON -DAUTH_BUILD_EXAMPLE=ON
 cmake --build "$build" --parallel "$(nproc)"
 ctest --test-dir "$build" -LE mariadb --output-on-failure
 case "$family" in
