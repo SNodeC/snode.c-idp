@@ -746,9 +746,18 @@ static void tokenAndClientTests(const std::string& cookieName = "access_token", 
 
 static void renewalTests() {
     using Status = OAuthClient::Authorization;
-    int64_t now = epochSeconds();
+    int64_t now = 1'700'000'000;
     const auto start = now;
-    JwtSigner signer("https://idp.example", privateKey());
+    const auto key = privateKey();
+    JwtSigner signer("https://idp.example", key);
+    const auto sign = [&](const JwtClaims& claims) {
+        const auto token = signer.sign(claims);
+        const auto header = Json::parse(decodeBase64Url(token.substr(0, token.find('.'))));
+        auto payload = verifiedJwt(token, signer.publicKey());
+        payload["iat"] = now;
+        payload["nbf"] = now;
+        return signedFixture(key, header, payload);
+    };
     std::string nonce, currentRefresh = randomToken(), lastOperation, lastRefresh;
     HttpResult lastResponse;
     bool revoked = false, delayed = false, lost = false, unavailable = false;
@@ -762,13 +771,12 @@ static void renewalTests() {
         claims.mfaVerified = true;
         claims.scopes = {"openid", "profile", "email"};
         claims.expiresAt = std::chrono::system_clock::time_point(std::chrono::seconds(now + 120));
-        const auto access = signer.sign(claims);
+        const auto access = sign(claims);
         claims.purpose = "id";
         claims.nonce = nonce;
         return HttpResult{
             200,
-            Json{{"access_token", access}, {"id_token", signer.sign(claims)}, {"refresh_token", currentRefresh}, {"refresh_retry", true}}
-                .dump()};
+            Json{{"access_token", access}, {"id_token", sign(claims)}, {"refresh_token", currentRefresh}, {"refresh_retry", true}}.dump()};
     };
     HttpExchange transport = [&](const auto& url, const auto&, const auto& body, const auto&, HttpCompletion done) {
         const auto fields = form(body);
