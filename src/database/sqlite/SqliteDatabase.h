@@ -137,9 +137,7 @@ namespace snodec::database::sqlite {
          * @param errmsg If non-null, receives the error message on failure.
          * @return true on success, false on failure.
          */
-        bool exec(const std::string& sql,
-                  const std::vector<std::string>& params = {},
-                  std::string* errmsg = nullptr);
+        bool exec(const std::string& sql, const std::vector<std::string>& params = {}, std::string* errmsg = nullptr);
 
         /**
          * @brief Execute a SELECT and call @p callback for each result row.
@@ -151,15 +149,11 @@ namespace snodec::database::sqlite {
          * @param errmsg   Receives the error message on failure.
          * @return true on success (even if zero rows), false on error.
          */
-        bool query(const std::string& sql,
-                   const std::vector<std::string>& params,
-                   const RowCallback& callback,
-                   std::string* errmsg = nullptr);
+        bool
+        query(const std::string& sql, const std::vector<std::string>& params, const RowCallback& callback, std::string* errmsg = nullptr);
 
         /// Convenience overload without params (SELECT with no placeholders).
-        bool query(const std::string& sql,
-                   const RowCallback& callback,
-                   std::string* errmsg = nullptr);
+        bool query(const std::string& sql, const RowCallback& callback, std::string* errmsg = nullptr);
 
         // ----------------------------------------------------------------
         // Convenience Accessors
@@ -174,9 +168,7 @@ namespace snodec::database::sqlite {
     private:
         /// Internal helper: prepare a statement and bind parameters.
         /// Returns nullptr on failure and sets *errmsg.
-        sqlite3_stmt* prepare(const std::string& sql,
-                              const std::vector<std::string>& params,
-                              std::string* errmsg);
+        sqlite3_stmt* prepare(const std::string& sql, const std::vector<std::string>& params, std::string* errmsg);
 
         sqlite3* db_; ///< Raw SQLite connection handle.
     };

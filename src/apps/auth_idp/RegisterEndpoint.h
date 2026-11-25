@@ -1,7 +1,8 @@
 #pragma once
 #include <string>
 
-inline std::string getRegisterPageHtml(const std::string& clientId, const std::string& redirectUri, const std::string& state, const std::string& scope) {
+inline std::string
+getRegisterPageHtml(const std::string& clientId, const std::string& redirectUri, const std::string& state, const std::string& scope) {
     return R"(
 <!DOCTYPE html>
 <html lang="en">
@@ -27,10 +28,14 @@ inline std::string getRegisterPageHtml(const std::string& clientId, const std::s
     <div class="container">
         <h1>Register Account</h1>
         <form method="POST" action="/auth/register">
-            <input type="hidden" name="client_id" value=")" + clientId + R"(" />
-            <input type="hidden" name="redirect_uri" value=")" + redirectUri + R"(" />
-            <input type="hidden" name="state" value=")" + state + R"(" />
-            <input type="hidden" name="scope" value=")" + scope + R"(" />
+            <input type="hidden" name="client_id" value=")" +
+           clientId + R"(" />
+            <input type="hidden" name="redirect_uri" value=")" +
+           redirectUri + R"(" />
+            <input type="hidden" name="state" value=")" +
+           state + R"(" />
+            <input type="hidden" name="scope" value=")" +
+           scope + R"(" />
             <div class="form-group">
                 <label>Username</label>
                 <input type="text" name="username" required placeholder="Choose a username">
@@ -45,7 +50,9 @@ inline std::string getRegisterPageHtml(const std::string& clientId, const std::s
             </div>
             <button type="submit">Create Account</button>
         </form>
-        <div class="footer"><a href="/auth/login?client_id=)" + clientId + R"(&redirect_uri=)" + redirectUri + R"(&state=)" + state + R"(&scope=)" + scope + R"(">Already have an account? Login here</a></div>
+        <div class="footer"><a href="/auth/login?client_id=)" +
+           clientId + R"(&redirect_uri=)" + redirectUri + R"(&state=)" + state + R"(&scope=)" + scope +
+           R"(">Already have an account? Login here</a></div>
     </div>
 </body>
 </html>
@@ -68,8 +75,10 @@ inline std::string getSuccessPageHtml(const std::string& title, const std::strin
 </head>
 <body>
     <div class="card">
-        <h1>)" + title + R"(</h1>
-        <p>)" + message + R"(</p>
+        <h1>)" +
+           title + R"(</h1>
+        <p>)" +
+           message + R"(</p>
         <a href="/auth/login" class="btn">Return to Login</a>
     </div>
 </body>

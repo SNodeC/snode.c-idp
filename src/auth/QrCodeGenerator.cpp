@@ -33,17 +33,20 @@ namespace snodec {
                                                         const std::string& algorithm) {
             // Use a clean issuer name for maximum compatibility
             std::string safeIssuer = issuer;
-            if (safeIssuer == "SNode.C") safeIssuer = "SNodeC";
-            
+            if (safeIssuer == "SNode.C")
+                safeIssuer = "SNodeC";
+
             // Standard format: otpauth://totp/Issuer:Account?secret=...&issuer=Issuer
             // We encode issuer and account name separately to keep the ':' literal in the path.
-            std::string uri = "otpauth://totp/" + urlEncode(safeIssuer) + ":" + urlEncode(accountName) + 
-                              "?secret=" + urlEncode(secretBase32) + 
-                              "&issuer=" + urlEncode(safeIssuer);
-                              
-            if (algorithm != "SHA1") uri += "&algorithm=" + urlEncode(algorithm);
-            if (digits != 6) uri += "&digits=" + std::to_string(digits);
-            if (period != 30) uri += "&period=" + std::to_string(period);
+            std::string uri = "otpauth://totp/" + urlEncode(safeIssuer) + ":" + urlEncode(accountName) +
+                              "?secret=" + urlEncode(secretBase32) + "&issuer=" + urlEncode(safeIssuer);
+
+            if (algorithm != "SHA1")
+                uri += "&algorithm=" + urlEncode(algorithm);
+            if (digits != 6)
+                uri += "&digits=" + std::to_string(digits);
+            if (period != 30)
+                uri += "&period=" + std::to_string(period);
 
             return uri;
         }

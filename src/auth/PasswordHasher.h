@@ -11,12 +11,11 @@
 
 #pragma once
 
+#include <cstdint>
+#include <iomanip>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
-
-#include <cstdint>
-#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,8 +30,8 @@ namespace snodec {
             // NIST SP 800-132 recommends >= 1000; OWASP 2023 recommends 600,000 for servers.
             // 100,000 is a practical compromise for ARM-based OpenWRT routers (~200ms on MT7981B).
             static constexpr int DEFAULT_ITERATIONS = 100000;
-            static constexpr int SALT_LENGTH = 16;     // 128-bit salt
-            static constexpr int HASH_LENGTH = 32;     // 256-bit derived key
+            static constexpr int SALT_LENGTH = 16; // 128-bit salt
+            static constexpr int HASH_LENGTH = 32; // 256-bit derived key
             static constexpr const char* PREFIX = "$pbkdf2-sha256$";
 
             /**
@@ -50,23 +49,19 @@ namespace snodec {
 
                 // Derive key using PBKDF2
                 std::vector<unsigned char> derivedKey(HASH_LENGTH);
-                if (PKCS5_PBKDF2_HMAC(
-                        password.c_str(),
-                        static_cast<int>(password.length()),
-                        salt.data(),
-                        SALT_LENGTH,
-                        iterations,
-                        EVP_sha256(),
-                        HASH_LENGTH,
-                        derivedKey.data()) != 1) {
+                if (PKCS5_PBKDF2_HMAC(password.c_str(),
+                                      static_cast<int>(password.length()),
+                                      salt.data(),
+                                      SALT_LENGTH,
+                                      iterations,
+                                      EVP_sha256(),
+                                      HASH_LENGTH,
+                                      derivedKey.data()) != 1) {
                     throw std::runtime_error("PasswordHasher: PKCS5_PBKDF2_HMAC failed");
                 }
 
                 // Encode as self-describing string
-                return std::string(PREFIX) +
-                       std::to_string(iterations) + "$" +
-                       toHex(salt) + "$" +
-                       toHex(derivedKey);
+                return std::string(PREFIX) + std::to_string(iterations) + "$" + toHex(salt) + "$" + toHex(derivedKey);
             }
 
             /**
@@ -90,22 +85,20 @@ namespace snodec {
 
                 // Derive key from provided password
                 std::vector<unsigned char> derivedKey(HASH_LENGTH);
-                if (PKCS5_PBKDF2_HMAC(
-                        password.c_str(),
-                        static_cast<int>(password.length()),
-                        salt.data(),
-                        static_cast<int>(salt.size()),
-                        iterations,
-                        EVP_sha256(),
-                        HASH_LENGTH,
-                        derivedKey.data()) != 1) {
+                if (PKCS5_PBKDF2_HMAC(password.c_str(),
+                                      static_cast<int>(password.length()),
+                                      salt.data(),
+                                      static_cast<int>(salt.size()),
+                                      iterations,
+                                      EVP_sha256(),
+                                      HASH_LENGTH,
+                                      derivedKey.data()) != 1) {
                     return false;
                 }
 
                 // Constant-time comparison to prevent timing attacks
-                return CRYPTO_memcmp(derivedKey.data(), expectedHash.data(),
-                                     std::min(derivedKey.size(), expectedHash.size())) == 0
-                       && derivedKey.size() == expectedHash.size();
+                return CRYPTO_memcmp(derivedKey.data(), expectedHash.data(), std::min(derivedKey.size(), expectedHash.size())) == 0 &&
+                       derivedKey.size() == expectedHash.size();
             }
 
             /**
@@ -113,9 +106,11 @@ namespace snodec {
              * Legacy format: 64 hex characters (no prefix).
              */
             static bool isLegacyHash(const std::string& storedHash) {
-                if (storedHash.length() != 64) return false;
+                if (storedHash.length() != 64)
+                    return false;
                 for (char c : storedHash) {
-                    if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+                    if (!std::isxdigit(static_cast<unsigned char>(c)))
+                        return false;
                 }
                 return true;
             }
@@ -125,8 +120,7 @@ namespace snodec {
              * Used during migration: if verification succeeds, the caller should
              * re-hash with hashPassword() and update the database.
              */
-            static bool verifyLegacy(const std::string& password, const std::string& storedHash,
-                                     const std::string& salt) {
+            static bool verifyLegacy(const std::string& password, const std::string& storedHash, const std::string& salt) {
                 unsigned char hash[SHA256_DIGEST_LENGTH];
                 std::string input = password + salt;
                 SHA256(reinterpret_cast<const unsigned char*>(input.data()), input.size(), hash);
@@ -138,7 +132,8 @@ namespace snodec {
 
                 // Constant-time comparison
                 std::string computed = ss.str();
-                if (computed.size() != storedHash.size()) return false;
+                if (computed.size() != storedHash.size())
+                    return false;
                 return CRYPTO_memcmp(computed.data(), storedHash.data(), computed.size()) == 0;
             }
 
@@ -154,8 +149,7 @@ namespace snodec {
             static std::vector<unsigned char> fromHex(const std::string& hex) {
                 std::vector<unsigned char> bytes;
                 for (size_t i = 0; i + 1 < hex.length(); i += 2) {
-                    bytes.push_back(static_cast<unsigned char>(
-                        std::strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
+                    bytes.push_back(static_cast<unsigned char>(std::strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
                 }
                 return bytes;
             }

@@ -55,7 +55,6 @@ namespace snodec::database::sqlite {
         : stmt_(stmt) {
     }
 
-
     int SqliteDatabase::Row::columnCount() const {
         return sqlite3_column_count(stmt_);
     }
@@ -90,10 +89,7 @@ namespace snodec::database::sqlite {
         // SQLITE_OPEN_CREATE  – create if it doesn't exist.
         // SQLITE_OPEN_READWRITE – allow reads and writes.
         // SQLITE_OPEN_FULLMUTEX – serialised threading mode (safe default).
-        const int rc = sqlite3_open_v2(filePath.c_str(),
-                                       &db_,
-                                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
-                                       nullptr);
+        const int rc = sqlite3_open_v2(filePath.c_str(), &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr);
         if (rc != SQLITE_OK) {
             const std::string msg = db_ ? sqlite3_errmsg(db_) : "unknown error";
             sqlite3_close(db_);
@@ -213,9 +209,7 @@ namespace snodec::database::sqlite {
     // Internal helper: prepare + bind
     // ========================================================================
 
-    sqlite3_stmt* SqliteDatabase::prepare(const std::string& sql,
-                                          const std::vector<std::string>& params,
-                                          std::string* errmsg) {
+    sqlite3_stmt* SqliteDatabase::prepare(const std::string& sql, const std::vector<std::string>& params, std::string* errmsg) {
         sqlite3_stmt* stmt = nullptr;
         int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
@@ -227,11 +221,7 @@ namespace snodec::database::sqlite {
 
         // Bind parameters positionally (1-based in SQLite API).
         for (int i = 0; i < static_cast<int>(params.size()); ++i) {
-            rc = sqlite3_bind_text(stmt,
-                                   i + 1,
-                                   params[static_cast<size_t>(i)].c_str(),
-                                   -1,
-                                   SQLITE_TRANSIENT);
+            rc = sqlite3_bind_text(stmt, i + 1, params[static_cast<size_t>(i)].c_str(), -1, SQLITE_TRANSIENT);
             if (rc != SQLITE_OK) {
                 if (errmsg) {
                     *errmsg = sqlite3_errmsg(db_);
@@ -248,9 +238,7 @@ namespace snodec::database::sqlite {
     // exec – run a DML/DDL statement (no result rows expected)
     // ========================================================================
 
-    bool SqliteDatabase::exec(const std::string& sql,
-                               const std::vector<std::string>& params,
-                               std::string* errmsg) {
+    bool SqliteDatabase::exec(const std::string& sql, const std::vector<std::string>& params, std::string* errmsg) {
         sqlite3_stmt* stmt = prepare(sql, params, errmsg);
         if (stmt == nullptr) {
             return false;
@@ -290,9 +278,7 @@ namespace snodec::database::sqlite {
         return rc == SQLITE_DONE;
     }
 
-    bool SqliteDatabase::query(const std::string& sql,
-                                const RowCallback& callback,
-                                std::string* errmsg) {
+    bool SqliteDatabase::query(const std::string& sql, const RowCallback& callback, std::string* errmsg) {
         return query(sql, {}, callback, errmsg);
     }
 

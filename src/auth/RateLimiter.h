@@ -108,8 +108,7 @@ namespace snodec {
                 if (expiresAt <= now) {
                     return 0;
                 }
-                return static_cast<int>(
-                    std::chrono::duration_cast<std::chrono::seconds>(expiresAt - now).count());
+                return static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(expiresAt - now).count());
             }
 
             /**
@@ -122,7 +121,7 @@ namespace snodec {
                 auto now = std::chrono::steady_clock::now();
                 auto cutoff = now - windowDuration_;
 
-                for (auto it = attempts_.begin(); it != attempts_.end(); ) {
+                for (auto it = attempts_.begin(); it != attempts_.end();) {
                     auto& deque = it->second;
                     while (!deque.empty() && deque.front() < cutoff) {
                         deque.pop_front();
@@ -146,7 +145,8 @@ namespace snodec {
             // Remove expired entries for a specific key (must hold lock)
             void cleanup(const std::string& key) {
                 auto it = attempts_.find(key);
-                if (it == attempts_.end()) return;
+                if (it == attempts_.end())
+                    return;
 
                 auto cutoff = std::chrono::steady_clock::now() - windowDuration_;
                 auto& deque = it->second;

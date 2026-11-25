@@ -19,16 +19,15 @@
 
 #pragma once
 
-#include <openssl/evp.h>
-#include <openssl/rand.h>
-#include <sys/stat.h>
-
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
 
 namespace snodec {
@@ -36,9 +35,9 @@ namespace snodec {
 
         class SecretEncryptor {
         public:
-            static constexpr int KEY_LENGTH = 32;  // 256-bit key
-            static constexpr int IV_LENGTH = 12;   // 96-bit IV (recommended for GCM)
-            static constexpr int TAG_LENGTH = 16;  // 128-bit authentication tag
+            static constexpr int KEY_LENGTH = 32; // 256-bit key
+            static constexpr int IV_LENGTH = 12;  // 96-bit IV (recommended for GCM)
+            static constexpr int TAG_LENGTH = 16; // 128-bit authentication tag
 
             /**
              * Generate a new random encryption key and write it to a file.
@@ -78,7 +77,8 @@ namespace snodec {
 
                 // Encrypt
                 EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-                if (!ctx) throw std::runtime_error("SecretEncryptor: EVP_CIPHER_CTX_new failed");
+                if (!ctx)
+                    throw std::runtime_error("SecretEncryptor: EVP_CIPHER_CTX_new failed");
 
                 if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
@@ -98,7 +98,8 @@ namespace snodec {
                 std::vector<unsigned char> ciphertext(plaintext.size() + EVP_MAX_BLOCK_LENGTH);
                 int len = 0;
                 if (EVP_EncryptUpdate(ctx,
-                                      ciphertext.data(), &len,
+                                      ciphertext.data(),
+                                      &len,
                                       reinterpret_cast<const unsigned char*>(plaintext.data()),
                                       static_cast<int>(plaintext.size())) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
@@ -150,7 +151,8 @@ namespace snodec {
 
                 // Decrypt
                 EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-                if (!ctx) throw std::runtime_error("SecretEncryptor: EVP_CIPHER_CTX_new failed");
+                if (!ctx)
+                    throw std::runtime_error("SecretEncryptor: EVP_CIPHER_CTX_new failed");
 
                 if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
@@ -169,18 +171,14 @@ namespace snodec {
 
                 std::vector<unsigned char> plaintext(ciphertext.size() + EVP_MAX_BLOCK_LENGTH);
                 int len = 0;
-                if (EVP_DecryptUpdate(ctx,
-                                      plaintext.data(), &len,
-                                      ciphertext.data(),
-                                      static_cast<int>(ciphertext.size())) != 1) {
+                if (EVP_DecryptUpdate(ctx, plaintext.data(), &len, ciphertext.data(), static_cast<int>(ciphertext.size())) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
                     throw std::runtime_error("SecretEncryptor: DecryptUpdate failed");
                 }
                 int plaintextLen = len;
 
                 // Set expected tag
-                if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LENGTH,
-                                        const_cast<unsigned char*>(tag.data())) != 1) {
+                if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LENGTH, const_cast<unsigned char*>(tag.data())) != 1) {
                     EVP_CIPHER_CTX_free(ctx);
                     throw std::runtime_error("SecretEncryptor: set tag failed");
                 }
@@ -204,12 +202,15 @@ namespace snodec {
             static bool isEncrypted(const std::string& value) {
                 // Encrypted format contains exactly two colons separating hex strings
                 auto parts = split(value, ':');
-                if (parts.size() != 3) return false;
+                if (parts.size() != 3)
+                    return false;
                 // Check that all parts are hex
                 for (const auto& p : parts) {
-                    if (p.empty()) return false;
+                    if (p.empty())
+                        return false;
                     for (char c : p) {
-                        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+                        if (!std::isxdigit(static_cast<unsigned char>(c)))
+                            return false;
                     }
                 }
                 return true;
@@ -246,8 +247,7 @@ namespace snodec {
                     throw std::runtime_error("SecretEncryptor: invalid hex encoding");
                 }
                 for (size_t i = 0; i + 1 < hex.length(); i += 2) {
-                    bytes.push_back(static_cast<unsigned char>(
-                        std::strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
+                    bytes.push_back(static_cast<unsigned char>(std::strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
                 }
                 return bytes;
             }

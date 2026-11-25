@@ -208,7 +208,8 @@ namespace snodec::auth {
                               {sha256(replacement), std::to_string(epochSeconds())},
                               [&](const auto&) {
                                   available = true;
-                              }) && available,
+                              }) &&
+                        available,
                     "Refresh operation no longer active");
         } else if (!refresh) {
             const auto verifier = parameters.value("code_verifier", std::string());

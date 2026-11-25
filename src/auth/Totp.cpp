@@ -152,7 +152,7 @@ namespace snodec {
         std::string Totp::generateOtpAuthUri(const std::string& base32Secret, const std::string& username, const std::string& issuer) {
             std::string cleanSecret = base32Secret;
             cleanSecret.erase(std::remove(cleanSecret.begin(), cleanSecret.end(), '='), cleanSecret.end());
-            
+
             std::ostringstream uri;
             uri << "otpauth://totp/" << issuer << ":" << username << "?secret=" << cleanSecret << "&issuer=" << issuer << "&algorithm=SHA1"
                 << "&digits=6"
