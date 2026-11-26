@@ -5,8 +5,7 @@ set(CPACK_DEBIAN_AUTH-IDP_PACKAGE_DEPENDS
 set(CPACK_RPM_AUTH-IDP_PACKAGE_REQUIRES
     "snodec-idp-client-dev = ${CPACK_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}, sqlite-devel"
 )
-# CPack reads the frozen dependency selection supplied by the chain. Local
-# packaging without a wave retains the ordinary unversioned discovery contract.
+# Native metadata records the exact dependency selection frozen in the wave.
 if(DEFINED ENV{DEPENDENCIES_JSON})
     set(dependencies "$ENV{DEPENDENCIES_JSON}")
     string(JSON count LENGTH "${dependencies}")
@@ -21,11 +20,11 @@ if(DEFINED ENV{DEPENDENCIES_JSON})
     endif()
     if(CPACK_GENERATOR STREQUAL "DEB")
         string(JSON codename GET "$ENV{TARGET_JSON}" codename)
-        set(bound " (>= ${version}-${revision}~${codename})")
+        set(bound " (= ${version}-${revision}~${codename})")
         set(variable CPACK_DEBIAN_AUTH-CLIENT_PACKAGE_DEPENDS)
     else()
         string(JSON disttag GET "$ENV{TARGET_JSON}" disttag)
-        set(bound " >= ${version}-${revision}.${disttag}")
+        set(bound " = ${version}-${revision}.${disttag}")
         set(variable CPACK_RPM_AUTH-CLIENT_PACKAGE_REQUIRES)
     endif()
     foreach(name snodec-http-server-express-legacy-in snodec-http-client

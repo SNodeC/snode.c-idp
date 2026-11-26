@@ -11,5 +11,5 @@ The chain supplies tagged source and submodules in `SOURCE_DIR`, CI assets in
 overrides CPack's project configuration with `$CI_DIR/package/config.cmake`, so a
 packaging correction can build the unchanged tag. Local CPack uses that same
 configuration file. Client development packages retain their existing dependency
-names and add a lower bound for the SNode.C version/revision used by the wave;
+names and record the exact SNode.C version/revision used by the wave;
 server development packages retain their exact matching client dependency.
