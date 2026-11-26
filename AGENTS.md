@@ -29,10 +29,11 @@ on owned translation units, not vendored QR sources.
 
 ## Workspace layout and validation
 
-Use repository-local `build/codex/<configuration>` for persistent builds and
-`checkouts/<task>` for explicitly approved additional checkouts. Both parent
-directories are ignored. Temporary builds and compiler scratch files belong
-under `/tmp/codex/build/snodec-idp/<task>`.
+Canonical source: `/home/voc/projects/snodec/snode.c-idp`. Persistent agent builds
+use `/home/voc/projects/snodec/build/codex/snode.c-idp/<configuration>`; manual
+builds use `/home/voc/projects/snodec/build/qtcreator/snode.c-idp/<configuration>`.
+Temporary builds and compiler scratch files belong under
+`/tmp/codex/build/snodec-idp/<task>`. Additional checkouts require owner approval.
 
 Validate both the full IDP build and `AUTH_CLIENT_ONLY=ON`. Also compile an
 external consumer against the installed client package: the redirect middleware

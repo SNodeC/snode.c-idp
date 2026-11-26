@@ -1,9 +1,12 @@
 {
-  "schema": 1,
+  "schema": 2,
   "package": "snodec-idp",
   "title": "SNode.C IDP",
   "depends_on": [
-    "snodec"
+    {
+      "package": "snodec",
+      "version": ">=0.0.0"
+    }
   ],
   "build": {
     "deb": "ci/package/native.sh",
@@ -40,7 +43,10 @@
       "sqlite-devel",
       "python3"
     ],
-    "openwrt": []
+    "openwrt": [],
+    "rpm@rocky-9": [
+      "gcc-toolset-14-gcc-c++"
+    ]
   },
   "targets": [
     "debian-trixie-amd64",
