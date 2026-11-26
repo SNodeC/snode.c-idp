@@ -16,7 +16,7 @@ diagnostics. Do not reintroduce Easylogging++ macros or compatibility wrappers.
 
 The root formatting/analysis configurations and `cmake/` formatting modules
 come from the shared canonical baseline. Preserve their style settings.
-Module discovery includes `examples/` and `tests/` as well as `src/`, and excludes `src/supplement/`, build directories, and
+Module discovery includes `examples/`, `tests/` and repository-owned `ci/` CMake assets as well as `src/`, and excludes `src/supplement/`, build directories, and
 checkouts from C++ formatting so vendored code is not rewritten.
 
 `cmake --build <build-dir> --target format` explicitly formats project C++ and
