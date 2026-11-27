@@ -16,7 +16,7 @@ diagnostics. Do not reintroduce Easylogging++ macros or compatibility wrappers.
 
 The root formatting/analysis configurations and `cmake/` formatting modules
 come from the shared canonical baseline. Preserve their style settings.
-Module discovery includes `examples/` and `tests/` as well as `src/`, and excludes `src/supplement/`, build directories, and
+Module discovery includes `examples/`, `tests/` and repository-owned `ci/` CMake assets as well as `src/`, and excludes `src/supplement/`, build directories, and
 checkouts from C++ formatting so vendored code is not rewritten.
 
 `cmake --build <build-dir> --target format` explicitly formats project C++ and
@@ -29,10 +29,11 @@ on owned translation units, not vendored QR sources.
 
 ## Workspace layout and validation
 
-Use repository-local `build/codex/<configuration>` for persistent builds and
-`checkouts/<task>` for explicitly approved additional checkouts. Both parent
-directories are ignored. Temporary builds and compiler scratch files belong
-under `/tmp/codex/build/snodec-idp/<task>`.
+Canonical source: `/home/voc/projects/snodec/snode.c-idp`. Persistent agent builds
+use `/home/voc/projects/snodec/build/codex/snode.c-idp/<configuration>`; manual
+builds use `/home/voc/projects/snodec/build/qtcreator/snode.c-idp/<configuration>`.
+Temporary builds and compiler scratch files belong under
+`/tmp/codex/build/snodec-idp/<task>`. Additional checkouts require owner approval.
 
 Validate both the full IDP build and `AUTH_CLIENT_ONLY=ON`. Also compile an
 external consumer against the installed client package: the redirect middleware
