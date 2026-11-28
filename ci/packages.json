@@ -2,6 +2,7 @@
   "schema": 2,
   "package": "snodec-idp",
   "title": "SNode.C IDP",
+  "releases": ">=2.0.7",
   "depends_on": [
     {
       "package": "snodec",
